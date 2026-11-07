@@ -12,6 +12,7 @@
 #include "pit.h"
 #include "input.h"
 #include "ata.h"
+#include "net.h"
 #include "fat16.h"
 #include "settings.h"
 #include "gui.h"
@@ -64,6 +65,7 @@ void kernel_main(uint32_t mb_info_address) {
 
     input_init();
     ata_init();
+    net_init();
     if (fat16_mount()) {
         settings_load();
     } else {

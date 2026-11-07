@@ -28,10 +28,11 @@ and a rounded dock along the bottom edge.
 folders and text files, rename items, read documents, and delete files.
 Every change is written to the FAT16 disk image.
 
-**web** is a native HTML reader for the documents in `WEB/`. It parses the
-installed pages, renders formatted text, and follows clickable links. It
-does not use a host browser. It is intentionally local: the current build
-does not include an Ethernet or TCP/IP stack, and HTTPS is not available.
+**web** is a native HTML reader for the documents in `WEB/` and for plain
+HTTP pages on the network. It parses the installed pages, renders formatted
+text, and follows clickable links. It does not use a host browser. The
+network stack talks to an Intel e1000 adapter and uses the QEMU/VirtualBox
+user-mode NAT address range. Plain HTTP is supported; HTTPS is not.
 
 **Settings** changes the theme, wallpaper and accent, and writes them to
 `SYSTEM/SETTINGS.CFG`. It also shows kernel, memory, display, disk, clock
@@ -55,12 +56,15 @@ Run the raw image with QEMU:
 ```sh
 qemu-system-i386 \
   -drive file=Bordify-OS.img,format=raw,if=ide \
+  -nic user,model=e1000 \
   -m 128 \
   -vga std
 ```
 
-For VirtualBox, create a 32-bit "Other/Unknown" VM with 128 MB of RAM,
-attach `Bordify-OS.vhd` to an IDE controller, and start it.
+The e1000 adapter uses the user-mode NAT network: address `10.0.2.15`,
+gateway `10.0.2.2` and DNS `10.0.2.3`. For VirtualBox, create a 32-bit
+"Other/Unknown" VM with 128 MB of RAM, attach `Bordify-OS.vhd` to an IDE
+controller, keep the default NAT adapter, and start it.
 
 ## Controls
 
