@@ -89,7 +89,7 @@ void irq_mask(int irq) {
     outb(port, value);
 }
 
-static void interrupt_dispatch(uint32_t *frame) {
+void interrupt_dispatch(uint32_t *frame) {
     uint32_t vector = frame[8];
     if (vector >= 32 && vector < 48) {
         int irq = (int)(vector - 32);

@@ -1,5 +1,6 @@
 #include "types.h"
 #include "config.h"
+#include "io.h"
 #include "serial.h"
 #include "printf.h"
 #include "mb2.h"

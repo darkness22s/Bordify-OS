@@ -47,3 +47,5 @@ _start:
     jmp 1b
 
 .size _start, . - _start
+
+.section .note.GNU-stack,"",@progbits

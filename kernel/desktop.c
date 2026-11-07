@@ -1,4 +1,5 @@
 #include "desktop.h"
+#include "io.h"
 #include "gui.h"
 #include "gfx.h"
 #include "settings.h"

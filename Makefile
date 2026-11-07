@@ -11,7 +11,7 @@ LDFLAGS := -m32 -no-pie -nostdlib -Wl,--build-id=none -T boot/linker.ld
 BUILD := build
 KERNEL := $(BUILD)/bordify.elf
 CFILES := $(wildcard kernel/*.c)
-AFILES := boot/boot.S
+AFILES := boot/boot.S kernel/isr.S
 OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o
@@ -30,6 +30,10 @@ $(BUILD)/kernel/%.o: kernel/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/boot/%.o: boot/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(BUILD)/kernel/%.o: kernel/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
