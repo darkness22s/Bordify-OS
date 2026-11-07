@@ -1,0 +1,21 @@
+Welcome to Bordify OS.
+
+This is a real, small operating system. The desktop, windows, fonts and
+icons you see are drawn directly to the screen by the Bordify kernel.
+
+Files is a working file manager. You can browse the FAT16 disk, create
+folders and text files, rename items, read documents and delete files.
+Changes are written back to the disk image.
+
+web is a small HTML reader for the pages installed on this machine.
+
+Settings controls the theme, wallpaper and accent, and stores those
+choices in SYSTEM/SETTINGS.CFG.
+
+Keyboard shortcuts:
+  F1  open Files
+  F2  open web
+  F3  open Settings
+
+Everything here is compiled from the source in this repository and
+packaged with GRUB into a bootable disk image.

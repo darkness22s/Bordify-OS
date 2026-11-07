@@ -1,0 +1,13 @@
+NOTES
+=====
+
+A short list of things worth trying:
+
+- Open Files and create a folder on the disk.
+- Create a text file, type a few lines, and press Enter.
+- Delete a file with the Delete button or the Delete key.
+- Change the wallpaper in Settings.
+- Close Settings and reopen it: the choice is still there.
+
+Because settings and documents live on the FAT16 partition, they survive
+a reboot of the virtual machine.
