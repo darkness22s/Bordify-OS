@@ -65,7 +65,7 @@ MOUNTED=1
 "${SUDO[@]}" mkdir -p "$MNT/boot/grub" "$MNT/WEB" "$MNT/DOCS" "$MNT/SYSTEM"
 "${SUDO[@]}" cp "$ROOT/boot/grub.cfg" "$MNT/boot/grub/grub.cfg"
 "${SUDO[@]}" cp "$KERNEL" "$MNT/boot/bordify.elf"
-"${SUDO[@]}" cp -a "$ROOT/assets/fs/." "$MNT/"
+"${SUDO[@]}" cp -r --no-preserve=mode,ownership,timestamps "$ROOT/assets/fs/." "$MNT/"
 
 "${SUDO[@]}" grub-install \
     --target=i386-pc \
