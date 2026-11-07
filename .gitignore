@@ -1,5 +1,6 @@
 build/
 dist/
+dist-ci/
 *.o
 *.elf
 *.img

@@ -39,15 +39,16 @@ and uptime information, plus Restart and Power off controls.
 
 ## Download and run
 
-Builds are produced by GitHub Actions. Open the **Actions** tab, choose the
-latest successful **Build Bordify OS images** run, and download the
-`Bordify-OS-images` artifact. It contains:
+Prebuilt images are attached to the [latest release](https://github.com/darkness22s/Bordify-OS/releases/latest):
 
 - `Bordify-OS.img` - raw MBR disk image
 - `Bordify-OS.img.xz` - compressed raw image
 - `Bordify-OS.vhd` - VirtualBox/Hyper-V virtual disk
 - `Bordify-OS.vhd.xz` - compressed VHD
 - `SHA256SUMS` - checksums
+
+Every push to `main` also produces the same files as the
+`Bordify-OS-images` artifact in the **Actions** tab.
 
 Run the raw image with QEMU:
 
@@ -66,6 +67,7 @@ attach `Bordify-OS.vhd` to an IDE controller, and start it.
 - Click a desktop shortcut to open an app.
 - Drag a window by its title bar.
 - Double-click a folder to enter it and a text file to read it.
+- Select an item and use **Rename** or **Delete** in the Files toolbar.
 - `F1`, `F2` and `F3` open Files, web and Settings from the desktop.
 - `Esc` closes dialogs, editors and prompts.
 
