@@ -646,7 +646,7 @@ static void web_draw(gui_window_t *window) {
         gfx_rounded_fill(bar_x, thumb_y, 4, thumb_h, 2, settings_line());
     }
     web.page_height = page_h;
-    gfx_set_clip(saved);
+    gfx_set_clip_rect(saved);
 }
 
 static void web_click_history(web_state_t *ws, int direction) {

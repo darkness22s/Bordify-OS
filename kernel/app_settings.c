@@ -100,7 +100,6 @@ static void draw_appearance(gui_window_t *window) {
     settings_page_layout(window, &x0, &y0, &w, &h);
     int left = x0 + 190 + 34;
     int top = y0 + 28;
-    int content_w = w - 190 - 68;
     gfx_text(&font_h2, left, top, "Appearance", settings_ink());
     gfx_text(&font_ui, left, top + 38,
              "Make this little machine feel like yours.", settings_muted());

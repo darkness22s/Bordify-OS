@@ -21,6 +21,7 @@ typedef enum {
 } prompt_mode_t;
 
 typedef struct {
+    gui_window_t *window;
     uint16_t cluster;
     uint16_t stack[FILES_MAX_DEPTH];
     int depth;
@@ -203,7 +204,12 @@ static void files_refresh(void) {
     if (fs.selected < 0) {
         fs.selected = 0;
     }
-    int visible_rows = (fs.list_bottom - fs.list_y) / fs.row_h;
+    int visible_rows = 1;
+    if (fs.window) {
+        files_layout_t l;
+        layout(fs.window, &l);
+        visible_rows = (l.list_bottom - l.list_y) / l.row_h;
+    }
     if (visible_rows < 1) {
         visible_rows = 1;
     }
@@ -739,8 +745,8 @@ static void files_key(gui_window_t *window, const key_event_t *event) {
 }
 
 static void files_init(gui_window_t *window) {
-    UNUSED(window);
     kmemset(&fs, 0, sizeof(fs));
+    fs.window = window;
     files_set_root();
 }
 
