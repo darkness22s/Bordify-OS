@@ -45,6 +45,7 @@ bool fat16_find(uint16_t dir_cluster, const char *name, fat_entry_t *entry);
 bool fat16_mkdir(uint16_t dir_cluster, const char *name);
 bool fat16_create_file(uint16_t dir_cluster, const char *name);
 bool fat16_delete(uint16_t dir_cluster, const char *name);
+bool fat16_rename(uint16_t dir_cluster, const char *name, const char *new_name);
 int fat16_read(uint16_t dir_cluster, const char *name, void *buffer, uint32_t max_size);
 int fat16_write(uint16_t dir_cluster, const char *name, const void *buffer, uint32_t size);
 int fat16_read_path(const char *path, void *buffer, uint32_t max_size);

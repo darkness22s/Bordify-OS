@@ -17,6 +17,7 @@ typedef enum {
     PROMPT_NONE = 0,
     PROMPT_FOLDER,
     PROMPT_FILE,
+    PROMPT_RENAME,
     PROMPT_DELETE,
 } prompt_mode_t;
 
@@ -36,6 +37,7 @@ typedef struct {
     uint32_t status_tick;
     prompt_mode_t prompt;
     char prompt_text[32];
+    char prompt_target[13];
     bool viewing;
     char viewer_name[32];
     char viewer_text[FILES_VIEWER_SIZE];
@@ -59,6 +61,7 @@ typedef struct {
     int up_w;
     int folder_x;
     int file_x;
+    int rename_x;
     int delete_x;
     int action_y;
     int action_h;
@@ -83,7 +86,8 @@ static void layout(gui_window_t *window, files_layout_t *l) {
     l->action_h = 30;
     l->action_y = l->y0 + 11;
     l->delete_x = l->x0 + l->w - 14 - 58;
-    l->file_x = l->delete_x - 8 - 68;
+    l->rename_x = l->delete_x - 8 - 72;
+    l->file_x = l->rename_x - 8 - 68;
     l->folder_x = l->file_x - 8 - 84;
     l->up_w = 38;
     l->up_x = l->folder_x - 9 - l->up_w;
@@ -99,6 +103,7 @@ static void set_status(const char *text) {
 static void prompt_reset(void) {
     fs.prompt = PROMPT_NONE;
     fs.prompt_text[0] = 0;
+    fs.prompt_target[0] = 0;
 }
 
 static void open_prompt(prompt_mode_t mode) {
@@ -107,6 +112,20 @@ static void open_prompt(prompt_mode_t mode) {
     if (mode == PROMPT_FOLDER) {
         kstrcpy(fs.prompt_text, "");
     }
+}
+
+static void open_rename_prompt(void) {
+    if (fs.selected < 0 || fs.selected >= fs.count) {
+        set_status("Nothing is selected");
+        return;
+    }
+    kstrncpy(fs.prompt_target, fs.entries[fs.selected].name,
+             sizeof(fs.prompt_target) - 1);
+    fs.prompt_target[sizeof(fs.prompt_target) - 1] = 0;
+    kstrncpy(fs.prompt_text, fs.entries[fs.selected].name,
+             sizeof(fs.prompt_text) - 1);
+    fs.prompt_text[sizeof(fs.prompt_text) - 1] = 0;
+    fs.prompt = PROMPT_RENAME;
 }
 
 static void files_set_root(void) {
@@ -248,6 +267,18 @@ static void confirm_prompt(void) {
         }
         prompt_reset();
         files_refresh();
+    } else if (fs.prompt == PROMPT_RENAME) {
+        if (!fs.prompt_text[0]) {
+            set_status("Please enter a name");
+            return;
+        }
+        if (fat16_rename(fs.cluster, fs.prompt_target, fs.prompt_text)) {
+            set_status("Renamed");
+        } else {
+            set_status("Could not rename item");
+        }
+        prompt_reset();
+        files_refresh();
     } else if (fs.prompt == PROMPT_DELETE) {
         if (fs.selected >= 0 && fs.selected < fs.count) {
             char name[13];
@@ -358,9 +389,11 @@ static void draw_toolbar(gui_window_t *window, files_layout_t *l) {
     ui_small_button(l->up_x, l->up_y, l->up_w, l->action_h, "Up", hover_up);
     bool hover_folder = ui_point_in(l->folder_x, l->action_y, 84, l->action_h, mouse.x, mouse.y);
     bool hover_file = ui_point_in(l->file_x, l->action_y, 68, l->action_h, mouse.x, mouse.y);
+    bool hover_rename = ui_point_in(l->rename_x, l->action_y, 72, l->action_h, mouse.x, mouse.y);
     bool hover_delete = ui_point_in(l->delete_x, l->action_y, 58, l->action_h, mouse.x, mouse.y);
     ui_small_button(l->folder_x, l->action_y, 84, l->action_h, "New folder", hover_folder);
     ui_small_button(l->file_x, l->action_y, 68, l->action_h, "New file", hover_file);
+    ui_small_button(l->rename_x, l->action_y, 72, l->action_h, "Rename", hover_rename);
     ui_small_button(l->delete_x, l->action_y, 58, l->action_h, "Delete", hover_delete);
 }
 
@@ -496,7 +529,8 @@ static void draw_prompt(gui_window_t *window, files_layout_t *l) {
     gfx_rounded_border(mx, my, mw, mh, 12, 1, settings_strong());
 
     const char *title = fs.prompt == PROMPT_FOLDER ? "New folder" :
-                        fs.prompt == PROMPT_FILE ? "New file" : "Delete item";
+                        fs.prompt == PROMPT_FILE ? "New file" :
+                        fs.prompt == PROMPT_RENAME ? "Rename item" : "Delete item";
     gfx_text(&font_title, mx + 24, my + 22, title, settings_ink());
 
     if (fs.prompt == PROMPT_DELETE) {
@@ -509,7 +543,8 @@ static void draw_prompt(gui_window_t *window, files_layout_t *l) {
         }
         gfx_text_clip(&font_ui, mx + 24, my + 88, message, mw - 48, settings_muted());
     } else {
-        gfx_text(&font_ui_small, mx + 24, my + 60, "NAME", settings_muted());
+        gfx_text(&font_ui_small, mx + 24, my + 60,
+                 fs.prompt == PROMPT_RENAME ? "NEW NAME" : "NAME", settings_muted());
         ui_field(fx, fy, fw, fh, fs.prompt_text, true,
                  fs.prompt_text[0] == 0);
     }
@@ -518,7 +553,8 @@ static void draw_prompt(gui_window_t *window, files_layout_t *l) {
     bool hover_action = ui_point_in(action_x, button_y, 86, 32, mouse.x, mouse.y);
     ui_small_button(cancel_x, button_y, 76, 32, "Cancel", hover_cancel);
     ui_button(action_x, button_y, 86, 32,
-              fs.prompt == PROMPT_DELETE ? "Delete" : "Create", true, hover_action);
+              fs.prompt == PROMPT_DELETE ? "Delete" :
+              fs.prompt == PROMPT_RENAME ? "Rename" : "Create", true, hover_action);
 }
 
 static void draw_viewer(gui_window_t *window, files_layout_t *l) {
@@ -604,7 +640,8 @@ static void files_prompt_click(int x, int y, files_layout_t *l) {
         confirm_prompt();
         return;
     }
-    if ((fs.prompt == PROMPT_FOLDER || fs.prompt == PROMPT_FILE) &&
+    if ((fs.prompt == PROMPT_FOLDER || fs.prompt == PROMPT_FILE ||
+         fs.prompt == PROMPT_RENAME) &&
         ui_point_in(fx, fy, fw, fh, x, y)) {
         return;
     }
@@ -641,6 +678,10 @@ static void files_mouse_down(gui_window_t *window, int x, int y) {
     }
     if (ui_point_in(l.file_x, l.action_y, 68, l.action_h, x, y)) {
         open_prompt(PROMPT_FILE);
+        return;
+    }
+    if (ui_point_in(l.rename_x, l.action_y, 72, l.action_h, x, y)) {
+        open_rename_prompt();
         return;
     }
     if (ui_point_in(l.delete_x, l.action_y, 58, l.action_h, x, y)) {
@@ -687,7 +728,8 @@ static void files_mouse_up(gui_window_t *window, int x, int y) {
 static void files_key(gui_window_t *window, const key_event_t *event) {
     UNUSED(window);
     if (fs.prompt != PROMPT_NONE) {
-        if (fs.prompt == PROMPT_FOLDER || fs.prompt == PROMPT_FILE) {
+        if (fs.prompt == PROMPT_FOLDER || fs.prompt == PROMPT_FILE ||
+            fs.prompt == PROMPT_RENAME) {
             if (event->ch >= 32 && event->ch < 127) {
                 size_t len = kstrlen(fs.prompt_text);
                 if (len + 1 < sizeof(fs.prompt_text)) {

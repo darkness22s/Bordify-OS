@@ -711,6 +711,36 @@ bool fat16_delete(uint16_t dir_cluster, const char *name) {
     return delete_entry(dir_cluster, &entry);
 }
 
+bool fat16_rename(uint16_t dir_cluster, const char *name, const char *new_name) {
+    if (!mounted || !name || !new_name) {
+        return false;
+    }
+    fat_entry_t entry;
+    if (!fat16_find(dir_cluster, name, &entry)) {
+        return false;
+    }
+    char name83[11];
+    fat16_name_to_83(new_name, name83);
+    if (name83[0] == ' ' || name83[0] == '.') {
+        return false;
+    }
+    char trimmed[13];
+    name83_string(name83, trimmed, sizeof(trimmed));
+    fat_entry_t existing;
+    if (fat16_find(dir_cluster, trimmed, &existing)) {
+        return false;
+    }
+    raw_dir_entry_t raw;
+    if (!dir_read_entry(dir_cluster, entry.slot, &raw)) {
+        return false;
+    }
+    kmemcpy(raw.name, name83, 11);
+    if (!dir_write_entry(dir_cluster, entry.slot, &raw)) {
+        return false;
+    }
+    return fat_sync();
+}
+
 static int read_entry_data(const fat_entry_t *entry, void *buffer, uint32_t max_size) {
     if (!entry || !buffer || max_size == 0) {
         return -1;
