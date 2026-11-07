@@ -83,7 +83,7 @@ isr_common:
     add $4, %esp
     popa
     add $8, %esp
-    iretd
+    iret
 
 .section .rodata
 .align 4
