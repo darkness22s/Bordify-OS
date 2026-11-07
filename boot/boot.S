@@ -18,6 +18,7 @@ mb2_header_start:
     .long 1024
     .long 768
     .long 32
+    .long 0             /* align the end tag to 8 bytes */
 
     .short 0
     .short 0
