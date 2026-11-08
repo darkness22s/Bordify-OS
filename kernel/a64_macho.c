@@ -84,6 +84,12 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
     report->exit_code = -1;
     report->steps = 0;
     report->unsupported_opcode = 0;
+    report->objc_linked_calls=0;
+    report->cocoa_window_created=false;
+    report->cocoa_window_visible=false;
+    report->cocoa_window_title_set=false;
+    report->cocoa_application_started=false;
+    report->cocoa_application_terminated=false;
     if (!file || !guest || !output ||
         file_size < 32 || file_size > A64_MACHO_MAX_FILE ||
         guest_size != A64_GUEST_BYTES ||
@@ -103,6 +109,9 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
     uint64_t segment_file_size = 0;
     uint64_t main_offset = 0;
     bool segment_found = false, main_found = false;
+    bool objc_note_found=false;
+    uint32_t objc_stubs[3]={0};
+    uint64_t objc_note_offset=0;
 
     size_t at = 32, end = 32 + command_bytes;
     for (uint32_t i = 0; i < commands; ++i) {
@@ -129,6 +138,19 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
             if (main_found || command_size != 24) return false;
             main_found = true;
             main_offset = le64(file + at + 8);
+        } else if (command==0x31u) { /* LC_NOTE, explicit Bordify import metadata */
+            static const char owner[16]="BORDIFY-OBJC";
+            if (objc_note_found || !darwin_mode || command_size!=40u ||
+                !within(file_size,at,40u))
+                return false;
+            for(unsigned k=0;k<16u;++k)
+                if (file[at+8u+k]!=(uint8_t)owner[k]) return false;
+            objc_note_offset=le64(file+at+24u);
+            if (le64(file+at+32u)!=32u ||
+                objc_note_offset>file_size ||
+                32u>file_size-(size_t)objc_note_offset)
+                return false;
+            objc_note_found=true;
         } else {
             /* No dyld, dylibs, shared cache or unknown load commands. */
             return false;
@@ -139,6 +161,29 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
         main_offset > segment_file_size ||
         segment_file_size - main_offset < 4 ||
         (main_offset & 3u)) return false;
+    if (objc_note_found) {
+        /* The LC_NOTE is a Bordify-specific, explicit static import table.
+         * Three compiler relocation targets must be exact SVC #0x82
+         * trampolines (objc_getClass, sel_registerName, objc_msgSend).
+         * This is not the Apple dyld binding protocol. */
+        size_t no=(size_t)objc_note_offset;
+        static const char magic[8]={'B','O','R','O','B','J','0','1'};
+        for(unsigned i=0;i<8u;++i)
+            if (file[no+i]!=(uint8_t)magic[i]) return false;
+        if (le32(file+no+8)!=3u || le32(file+no+12)!=1u ||
+            le32(file+no+28)!=0u) return false;
+        for(unsigned i=0;i<3u;++i) {
+            uint32_t at_stub=le32(file+no+16u+i*4u);
+            if ((at_stub&3u)!=0u || at_stub<512u ||
+                at_stub>segment_file_size ||
+                segment_file_size-at_stub<4u ||
+                le32(file+at_stub)!=(0xd4000001u|(0x82u<<5)))
+                return false;
+            for(unsigned j=0;j<i;++j)
+                if (at_stub==objc_stubs[j]) return false;
+            objc_stubs[i]=at_stub;
+        }
+    }
     bytes_zero(guest, guest_size);
     bytes_copy(guest, file, (size_t)segment_file_size);
 
@@ -379,9 +424,29 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
                 if (registers[16]==1) {
                     report->exit_code=(int)(int32_t)registers[0];
                     report->finished=true;
+                    report->cocoa_window_created=objc_state.window_created;
+                    report->cocoa_window_visible=objc_state.window_visible;
+                    report->cocoa_window_title_set=objc_state.window_title_set;
+                    report->cocoa_application_started=objc_state.application_started;
+                    report->cocoa_application_terminated=objc_state.application_terminated;
                     return true;
                 }
                 return false;
+            }
+            if (darwin_mode && immediate==0x82u && objc_note_found) {
+                unsigned operation=0;
+                for(unsigned i=0;i<3u;++i)
+                    if (pc==A64_GUEST_BASE+(uint64_t)objc_stubs[i])
+                        operation=11u+i;
+                if (!operation ||
+                    !darwin_objc_call(operation,registers,guest,guest_size,
+                                      A64_GUEST_BASE,&objc_state))
+                    return false;
+                ++report->objc_linked_calls;
+                /* BL/RET semantics, standard Apple ARM64 x0/x1/x2 ABI.
+                 * Returns from the import trampoline via the guest LR. */
+                pc=registers[30];
+                continue;
             }
             if (darwin_mode && immediate==0x81u) {
                 /* Experimental objc_* guest bridge. This is NOT dyld,
