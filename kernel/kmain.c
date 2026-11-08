@@ -19,6 +19,7 @@
 #include "desktop.h"
 #include "icons.h"
 #include "process.h"
+#include "udif_demo.h"
 
 extern uint8_t kernel_end;
 
@@ -74,6 +75,7 @@ void kernel_main(uint32_t mb_info_address) {
         kprintf("[kernel] no FAT16 disk, continuing with defaults\n");
     }
 
+    udif_demo_probe();
     process_init();
     if (fat16_mounted()) {
         /* Boot-time end-to-end test: runs from FAT16 at CPL3, not in kernel. */
