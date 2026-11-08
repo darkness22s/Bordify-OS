@@ -1,5 +1,6 @@
 #include "gdt.h"
 #include "types.h"
+#include "string.h"
 
 typedef struct {
     uint16_t limit_low;
@@ -15,8 +16,20 @@ typedef struct {
     uint32_t base;
 } PACKED gdt_pointer_t;
 
-static gdt_entry_t gdt[3];
+/* x86 selectors: 0x08 kernel CS, 0x10 kernel DS, 0x1B user CS,
+ * 0x23 user DS, 0x28 TSS. The I/O bitmap is absent, denying ring-3 I/O. */
+static gdt_entry_t gdt[6];
 static gdt_pointer_t gdt_ptr;
+
+typedef struct {
+    uint32_t prev, esp0, ss0, esp1, ss1, esp2, ss2;
+    uint32_t cr3, eip, eflags, eax, ecx, edx, ebx, esp, ebp, esi, edi;
+    uint32_t es, cs, ss, ds, fs, gs, ldt;
+    uint16_t trap, iomap;
+} PACKED tss_t;
+
+static tss_t tss;
+static uint8_t syscall_kernel_stack[16384] __attribute__((aligned(16)));
 
 static void gdt_set_gate(int index, uint32_t base, uint32_t limit, uint8_t access, uint8_t granularity) {
     gdt[index].base_low = (uint16_t)(base & 0xFFFF);
@@ -34,6 +47,14 @@ void gdt_init(void) {
     gdt_set_gate(0, 0, 0, 0, 0);
     gdt_set_gate(1, 0, 0xFFFFF, 0x9A, 0xCF);
     gdt_set_gate(2, 0, 0xFFFFF, 0x92, 0xCF);
+    gdt_set_gate(3, 0, 0xFFFFF, 0xFA, 0xCF); /* user 32-bit code */
+    gdt_set_gate(4, 0, 0xFFFFF, 0xF2, 0xCF); /* user 32-bit data */
+    kmemset(&tss, 0, sizeof(tss));
+    tss.ss0 = 0x10;
+    tss.esp0 = (uint32_t)(uintptr_t)(syscall_kernel_stack +
+                                      sizeof(syscall_kernel_stack));
+    tss.iomap = sizeof(tss); /* no ring-3 port access */
+    gdt_set_gate(5, (uint32_t)(uintptr_t)&tss, sizeof(tss) - 1, 0x89, 0x00);
     __asm__ volatile("lgdt (%0)" : : "r"(&gdt_ptr));
     __asm__ volatile(
         "ljmp $0x08, $1f\n"
@@ -45,4 +66,6 @@ void gdt_init(void) {
         "mov %%ax, %%gs\n"
         "mov %%ax, %%ss\n"
         : : : "eax", "memory");
+    uint16_t tss_selector = 0x28;
+    __asm__ volatile("ltr %0" : : "r"(tss_selector));
 }
