@@ -1,4 +1,5 @@
 #include "a64_macho.h"
+#include "darwin_objc.h"
 
 /* ARM64 is always interpreted here. No foreign machine code enters ring 0. */
 static uint32_t le32(const uint8_t *p) {
@@ -18,10 +19,10 @@ static void bytes_zero(uint8_t *to, size_t size) {
     for (size_t i = 0; i < size; ++i) to[i] = 0;
 }
 
-bool a64_macho_run(const uint8_t *file, size_t file_size,
-                   uint8_t *guest, size_t guest_size,
-                   a64_output_t output, void *context,
-                   a64_report_t *report) {
+static bool a64_run_impl(const uint8_t *file, size_t file_size,
+                         uint8_t *guest, size_t guest_size,
+                         a64_output_t output, void *context,
+                         a64_report_t *report, bool darwin_mode) {
     if (!report) return false;
     report->finished = false;
     report->exit_code = -1;
@@ -86,6 +87,7 @@ bool a64_macho_run(const uint8_t *file, size_t file_size,
     bytes_copy(guest, file, (size_t)segment_file_size);
 
     uint64_t registers[31] = {0};
+    darwin_objc_state_t objc_state = {0};
     uint64_t pc = A64_GUEST_BASE + main_offset;
     for (uint32_t step = 0; step < A64_MAX_STEPS; ++step) {
         uint64_t offset = pc - A64_GUEST_BASE;
@@ -115,9 +117,54 @@ bool a64_macho_run(const uint8_t *file, size_t file_size,
             pc += 4;
             continue;
         }
+        if ((instruction & 0xffe0ffe0u) == 0xaa0003e0u) {
+            /* ARM64 MOV Xd,Xm (ORR Xd,XZR,Xm alias). */
+            unsigned rd=instruction & 31u;
+            unsigned rm=(instruction >> 16) & 31u;
+            if (rd!=31u) registers[rd]=rm==31u ? 0 : registers[rm];
+            pc+=4;
+            continue;
+        }
         if ((instruction & 0xffe0001fu) == 0xd4000001u) {
+            unsigned immediate=(instruction >> 5) & 0xffffu;
+            if (darwin_mode && immediate == 0x80u) {
+                /* Darwin ARM64 BSD syscall subset, not Linux or Bordify ABI.
+                 * write(4), exit(1), getpid(20); unsupported calls fail. */
+                if (registers[16]==4) {
+                    uint64_t addr=registers[1], count=registers[2];
+                    if (registers[0]!=1 || addr < A64_GUEST_BASE ||
+                        addr-A64_GUEST_BASE > guest_size || count>256 ||
+                        count>guest_size-(size_t)(addr-A64_GUEST_BASE))
+                        return false;
+                    output(guest+(size_t)(addr-A64_GUEST_BASE),
+                           (size_t)count,context);
+                    registers[0]=count;
+                    pc+=4;
+                    continue;
+                }
+                if (registers[16]==20) {
+                    registers[0]=1; /* fixed synthetic process ID */
+                    pc+=4;
+                    continue;
+                }
+                if (registers[16]==1) {
+                    report->exit_code=(int)(int32_t)registers[0];
+                    report->finished=true;
+                    return true;
+                }
+                return false;
+            }
+            if (darwin_mode && immediate==0x81u) {
+                /* Experimental objc_* guest bridge. This is NOT dyld,
+                 * actual libobjc linking, or a Cocoa GUI framework. */
+                if (!darwin_objc_call(registers[8],registers,guest,guest_size,
+                                      A64_GUEST_BASE,&objc_state))
+                    return false;
+                pc+=4;
+                continue;
+            }
             /* SVC #0: guest demonstration ABI, NOT a Darwin syscall. */
-            if (((instruction >> 5) & 0xffffu) != 0) return false;
+            if (immediate != 0) return false;
             if (registers[8] == 1) {
                 uint64_t address = registers[0], count = registers[1];
                 if (address < A64_GUEST_BASE ||
@@ -141,4 +188,19 @@ bool a64_macho_run(const uint8_t *file, size_t file_size,
         return false;
     }
     return false;     /* bounded instruction count */
+}
+
+bool a64_macho_run(const uint8_t *file, size_t file_size,
+                   uint8_t *guest, size_t guest_size,
+                   a64_output_t output, void *context,
+                   a64_report_t *report) {
+    return a64_run_impl(file,file_size,guest,guest_size,output,context,
+                        report,false);
+}
+bool a64_macho_run_darwin(const uint8_t *file, size_t file_size,
+                          uint8_t *guest, size_t guest_size,
+                          a64_output_t output, void *context,
+                          a64_report_t *report) {
+    return a64_run_impl(file,file_size,guest,guest_size,output,context,
+                        report,true);
 }
