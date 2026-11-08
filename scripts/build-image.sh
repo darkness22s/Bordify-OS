@@ -7,6 +7,7 @@ DEMO="$ROOT/build/apps/hello.elf"
 FAULT="$ROOT/build/apps/fault.elf"
 WIN32="$ROOT/build/apps/winhello.exe"
 DMG="$ROOT/build/apps/dmgdemo.dmg"
+ZDMG="$ROOT/build/apps/zdmg.dmg"
 ARM="$ROOT/build/apps/armhello.mch"
 DIST="$ROOT/dist"
 IMG="$DIST/Bordify-OS.img"
@@ -15,7 +16,7 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$DMG" ] || [ ! -f "$ARM" ]; then
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$ARM" ]; then
     echo "Missing kernel or demo executables; run make first." >&2
     exit 1
 fi
@@ -74,6 +75,7 @@ MOUNTED=1
 "${SUDO[@]}" cp "$FAULT" "$MNT/APPS/FAULT.ELF"
 "${SUDO[@]}" cp "$WIN32" "$MNT/APPS/WINHELLO.EXE"
 "${SUDO[@]}" cp "$DMG" "$MNT/APPS/DMGDEMO.DMG"
+"${SUDO[@]}" cp "$ZDMG" "$MNT/APPS/ZDMG.DMG"
 "${SUDO[@]}" cp "$ARM" "$MNT/APPS/ARMHELLO.MCH"
 "${SUDO[@]}" cp -r --no-preserve=mode,ownership,timestamps "$ROOT/assets/fs/." "$MNT/"
 
