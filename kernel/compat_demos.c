@@ -100,12 +100,24 @@ static bool installed_commit(const uint8_t *data, size_t bytes, void *ctx) {
     if (!fat16_mounted() || !data || bytes<512 ||
         bytes>sizeof(installed_verify) ||
         !fat16_find(0,"APPS",&apps) ||
-        !(apps.attr & FAT_ATTR_DIRECTORY) ||
-        fat16_write(apps.cluster,"APP64.EXE",data,(uint32_t)bytes) !=
-          (int)bytes) return false;
+        !(apps.attr & FAT_ATTR_DIRECTORY)) {
+        kprintf("[win64-install] commit precondition failed: bytes=%u\n",
+                (uint32_t)bytes);
+        return false;
+    }
+    int stored=fat16_write(apps.cluster,"APP64.EXE",data,(uint32_t)bytes);
+    if (stored!=(int)bytes) {
+        kprintf("[win64-install] FAT16 write failed: got=%d expected=%u\n",
+                stored,(uint32_t)bytes);
+        return false;
+    }
     int got=fat16_read(apps.cluster,"APP64.EXE",
                        installed_verify,(uint32_t)sizeof(installed_verify));
-    return got==(int)bytes && kmemcmp(installed_verify,data,bytes)==0;
+    bool match=got==(int)bytes && kmemcmp(installed_verify,data,bytes)==0;
+    if (!match)
+        kprintf("[win64-install] FAT16 readback failed: got=%d expected=%u\n",
+                got,(uint32_t)bytes);
+    return match;
 }
 int compat_win64_installed_run(void) {
     uint32_t bytes=load_demo("APP64.EXE");
@@ -123,14 +135,21 @@ int compat_win64_installed_run(void) {
 }
 int compat_win64_installer_run(void) {
     uint32_t bytes=load_demo("SETUP64.EXE");
-    pe64_report_t installed;
-    if (!bytes ||
-        !pe64_vm_run_install(file_data,bytes,x64_memory,sizeof(x64_memory),
-                            serial_bytes,NULLPTR,installed_commit,NULLPTR,
-                            &installed) ||
-        !installed.finished || installed.exit_code!=0 ||
+    pe64_report_t installed={0};
+    if (!bytes) {
+        kprintf("[win64-install] SETUP64.EXE not readable from FAT16\n");
+        return -1;
+    }
+    bool executed=pe64_vm_run_install(file_data,bytes,x64_memory,
+                                      sizeof(x64_memory),serial_bytes,
+                                      NULLPTR,installed_commit,NULLPTR,
+                                      &installed);
+    if (!executed || !installed.finished || installed.exit_code!=0 ||
         installed.installed_bytes!=2048u) {
-        kprintf("[win64-install] x64 setup rejected or installation failed\n");
+        kprintf("[win64-install] setup rejected: run=%u file=%u steps=%u imports=%u committed=%u exit=%d\n",
+                executed ? 1u : 0u,bytes,installed.steps,
+                installed.imports,installed.installed_bytes,
+                installed.exit_code);
         return -1;
     }
     kprintf("[win64-install] PE32+ installer committed APP64.EXE (%u bytes)\n",
