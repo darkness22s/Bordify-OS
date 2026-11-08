@@ -39,7 +39,7 @@ int main(void) {
     assert(!a64_macho_run_darwin(file,size,guest,sizeof(guest),
                                  output,NULL,&r));
     file[0x220]='s';
-    file[0x100]=0xff; /* unsupported ARM64 instruction */
+    memset(file+0x100,0xff,4); /* force invalid 32-bit opcode */
     assert(!a64_macho_run_darwin(file,size,guest,sizeof(guest),
                                  output,NULL,&r));
     assert(r.unsupported_opcode!=0);
