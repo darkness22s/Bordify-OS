@@ -34,7 +34,8 @@ def make(output, compress=False, hfsplus=False):
         be32(raw, header + 40, 4096)     # allocation block bytes
         be32(raw, header + 44, 8)        # 8 blocks, 64 sectors
         be32(raw, header + 48, 3)        # free blocks
-        be32(raw, header + 276, 8192)    # catalog logical bytes\n        be32(raw, header + 284, 2)       # catalog fork total blocks
+        be32(raw, header + 276, 8192)    # catalog logical bytes
+        be32(raw, header + 284, 2)       # catalog fork total blocks
         be32(raw, header + 288, 2)       # catalog first extent start
         be32(raw, header + 292, 2)       # catalog first extent length
         # Synthetic B-tree header node at first catalog extent, block 2.
