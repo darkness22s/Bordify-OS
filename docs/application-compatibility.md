@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32 and x86 PE32 console demos, bounded PE32+ AMD64 interpreter, ARM64 Mach-O interpreter with opt-in Darwin BSD syscall and Objective-C guest shims, and read-only DMG/HFS+ probes verified in QEMU**. Real Windows x64 installers, macOS applications, DMG installation and full Darwin/Cocoa frameworks are **NOT** supported.
+Status: **native ELF32/x86 PE32 demos, experimental x64 PE32+ console interpreter and a restricted real file-writing PE32+ installer fixture, ARM64 Mach-O and Darwin/ObjC shims, and DMG/HFS+ probes verified by QEMU**. One synthetic x64 setup can install and launch its embedded app from FAT16, but arbitrary third-party Windows x64 installers, macOS applications, DMG installation and full Darwin/Cocoa frameworks are **NOT** supported.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -9,13 +9,13 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 
 | Requested feature | Verified now | Not yet working |
 | --- | --- | --- |
-| Windows x64 EXE installers | 🟡 Real **PE32+ AMD64** demo interpreted with Win64 calling convention and three `kernel32` imports in QEMU | **No actual installer execution**; full x64 instruction set, DLL loading, file/registry/install APIs, process isolation and real setup engines |
+| Windows x64 EXE installers | 🟢 **Audited built-in installer fixture only:** real PE32+ AMD64 setup invokes `CreateFileA/WriteFile/CloseHandle`, writes a second PE32+ app onto FAT16, which Bordify reads and runs; GitHub Actions verifies persistence byte-for-byte | ⚠️ **General installer feature is still incomplete:** downloaded third-party x64 EXEs, NSIS/Inno/MSI setup, GUI, DLLs, broad Win32 APIs, arbitrary filesystem paths, production isolation, native 64-bit execution |
 | macOS DMG mounting and installation | DMG footer + XML blkx maps; raw/zero/zlib sectors and read-only HFS+ volume and catalog B-tree header metadata from FAT16 disk | Other compression codecs, HFS+ catalog record traversal, APFS, full filesystem mounting, PKG/.app installation |
 | Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
 | Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
 | macOS Darwin/Cocoa runtime | 🟡 ARM64 Mach-O demo calls BSD `write/exit/getpid` subset and experimental ObjC `objc_getClass/objc_msgSend` shim for `NSString` and `NSApplication` methods | Real dyld/libobjc symbol linkage, broader libSystem/Objective-C/Swift, Foundation/AppKit GUI, and actual macOS app compatibility |
 
-**Release policy:** Only mark an item green after a real, licensed sample installer and installed application have passed automated end-to-end tests. A synthetic fixture is a lower-level milestone.
+**Acceptance policy:** A green check for a **particular test fixture** means only that fixture passes end-to-end installation and boot tests. The requested **general Windows x64 installer** capability is NOT green or production-ready until independent, real-world, legally redistributable x64 installers and their installed apps pass end-to-end tests in Bordify. A generated PE fixture cannot establish general third-party compatibility.
 
 ## End-state goals
 
@@ -90,7 +90,15 @@ Implemented a bounded PE32 loader for a single x86 executable at the fixed user 
 
 `APPS/WIN64.EXE` is a **real PE32+ AMD64** sample with a 64-bit PE optional header, a mapped x64 section, import directory, 64-bit IAT thunks, and Microsoft x64 calling-convention arguments. The freestanding `kernel/pe64_vm.c` interpreter checks headers, sections, import strings, bounds and instruction count before stepping a very small x64 instruction subset. Its guest-only call dispatcher models `GetStdHandle`, `WriteFile`, `ExitProcess` and `GetLastError` from `kernel32.dll`. The guest program prints through `WriteFile` and exits successfully; tests reject malformed PE32+, imports, unsupported instructions and invalid guest memory. Boot and Files can launch this audited sample.
 
-**Important:** x64 code is **interpreted**, not natively run in CPU long mode. No general x64 executables, Win64 DLLs, Windows GUI, installer engines, installer file operations, permissions or registry are implemented. This is a *yellow foundation for the Windows x64 installer roadmap*, not a working x64 installer feature.
+**Important:** x64 code is **interpreted**, not natively run in CPU long mode. No general x64 executables, Win64 DLLs, Windows GUI, installer engines, unrestricted installation operations, permissions or registry are implemented; an audited installer write subset is described below. This is a *yellow foundation for the Windows x64 installer roadmap*, not a working x64 installer feature.
+
+### Stage 1.8 — Restricted Windows x64 installer execution, persistent FAT16 integration (QEMU verified)
+
+`tools/genwin64setup.py` produces `APPS/SETUP64.EXE`, a genuine self-contained **PE32+ x86-64** executable which embeds a second valid PE32+ application. It runs via the existing bounded AMD64 instruction interpreter using real Win64 API imports and calling conventions. Added `CreateFileA`, `WriteFile` and `CloseHandle` semantics stage up to 8 KiB of installer output and commit it through an explicit host callback **only** to the audited `C:\\APP64.EXE` path, mapped to `/APPS/APP64.EXE` on FAT16. Guest-controlled arbitrary paths and API calls are rejected.
+
+During boot, the setup is loaded from FAT16, executes in the interpreter, writes the payload, closes the handle, and verifies disk content. Bordify then loads and **executes the installed PE32+ x64 app**. The Files application can also launch `SETUP64.EXE` and the resulting `APP64.EXE`. The host tests check creation, installed program execution, disallowed filenames, malformed imports, and callback failure. The QEMU CI test uses an independent **writable copy** of the boot image; after guest execution it extracts `APPS/APP64.EXE` via `mcopy` and `cmp` checks byte-for-byte against the known payload. GitHub Actions run: https://github.com/darkness22s/Bordify-OS/actions/runs/42506291866.
+
+**Security and compatibility limits:** This is an audited *synthetic sample installer*, not NSIS, Inno Setup, MSI, or a genuine third-party installer. The interpreter supports a tiny x86-64 instruction subset; it cannot run most independent x64 binaries or dependencies. It stages its writes in kernel memory, has no per-process sandbox or transaction rollback for unexpected filesystem I/O failures, and remains unsafe for untrusted code. Green applies **only to this one narrow installation test**. Full Windows x64 installers are still incomplete.
 
 ### Stage 1.7 — Experimental ARM64 Darwin BSD/Objective-C bridge (QEMU verified)
 
