@@ -25,7 +25,11 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg
+
+$(BUILD)/apps/dmgdemo.dmg: tools/genudifdemo.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genudifdemo.py $@
 
 $(BUILD)/apps/winhello.exe: tools/genwin32demo.py
 	@mkdir -p $(BUILD)/apps
