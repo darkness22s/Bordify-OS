@@ -13,6 +13,10 @@
 #define WEB_URL_SIZE 1024
 #define WEB_HISTORY 12
 #define WEB_MAX_LINKS 160
+#define WEB_CSS_RULES 128
+#define WEB_CSS_BUFFER_SIZE (64 * 1024)
+#define WEB_CSS_SELECTOR_SIZE 96
+#define WEB_CSS_VALUE_SIZE 48
 
 typedef struct {
     char href[WEB_URL_SIZE];
@@ -42,6 +46,16 @@ typedef struct {
 } web_state_t;
 
 typedef struct {
+    char selector[WEB_CSS_SELECTOR_SIZE];
+    char color[WEB_CSS_VALUE_SIZE];
+    char background[WEB_CSS_VALUE_SIZE];
+    int font_px;
+    bool bold;
+    bool has_bold;
+    bool hidden;
+} web_css_rule_t;
+
+typedef struct {
     web_state_t *ws;
     int page_left;
     int page_top;
@@ -52,6 +66,8 @@ typedef struct {
     int scroll;
     int content_height;
     const font_t *font;
+    uint32_t text_color;
+    uint32_t base_text_color;
     bool bold;
     bool href_active;
     char href[WEB_URL_SIZE];
@@ -60,6 +76,9 @@ typedef struct {
 } html_ctx_t;
 
 static web_state_t web;
+static web_css_rule_t web_css[WEB_CSS_RULES];
+static int web_css_count;
+static char web_css_buffer[WEB_CSS_BUFFER_SIZE];
 
 static const char *home_fallback =
     "<html><head><title>Bordify Web</title></head><body>"
@@ -110,7 +129,7 @@ static void html_draw_word(html_ctx_t *ctx, const char *word) {
     if (!word || !word[0]) {
         return;
     }
-    uint32_t color = ctx->href_active ? settings_accent() : settings_ink();
+    uint32_t color = ctx->href_active ? settings_accent() : ctx->text_color;
     int width = gfx_text_width(ctx->font, word);
     if (ctx->x > ctx->page_left && ctx->x + width > ctx->page_left + ctx->page_width) {
         html_newline(ctx);
@@ -228,6 +247,118 @@ static void extract_href(const char *tag_body, char *out, size_t out_size) {
     }
 }
 
+static void web_tag_attribute(const char *tag_body, const char *wanted,
+                             char *out, size_t out_size) {
+    out[0] = 0;
+    const char *p = tag_body;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '/') p++;
+        const char *key = p;
+        while (*p && *p != '=' && *p != ' ' && *p != '\t' && *p != '>') p++;
+        size_t key_len = (size_t)(p - key);
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '=') { if (*p) p++; continue; }
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+        char quote = 0;
+        if (*p == '"' || *p == '\'') quote = *p++;
+        const char *value = p;
+        if (quote) while (*p && *p != quote) p++;
+        else while (*p && *p != ' ' && *p != '\t' && *p != '>') p++;
+        if (key_len == kstrlen(wanted) && kstrncmp(key, wanted, key_len) == 0) {
+            size_t n = (size_t)(p - value);
+            if (n >= out_size) n = out_size - 1;
+            kmemcpy(out, value, n); out[n] = 0; return;
+        }
+        if (quote && *p) p++;
+    }
+}
+
+static uint32_t web_css_color(const char *value, uint32_t fallback) {
+    if (value[0] == '#' && kstrlen(value) == 7) return (uint32_t)kstrtoul(value + 1, 16);
+    if (kstricmp(value, "black") == 0) return 0x000000;
+    if (kstricmp(value, "white") == 0) return 0xFFFFFF;
+    if (kstricmp(value, "red") == 0) return 0xCC2222;
+    if (kstricmp(value, "green") == 0) return 0x228844;
+    if (kstricmp(value, "blue") == 0) return 0x2255CC;
+    if (kstricmp(value, "gray") == 0 || kstricmp(value, "grey") == 0) return 0x777777;
+    if (kstricmp(value, "navy") == 0) return 0x182B49;
+    return fallback;
+}
+
+static bool web_css_selector_matches(const char *selector, const char *tag,
+                                     const char *classes, const char *id);
+
+static bool web_css_apply_tag(const char *tag, const char *tag_body,
+                              html_ctx_t *ctx) {
+    char classes[128], id[64];
+    web_tag_attribute(tag_body, "class", classes, sizeof(classes));
+    web_tag_attribute(tag_body, "id", id, sizeof(id));
+    bool hidden = false;
+    for (int i = 0; i < web_css_count; i++) {
+        web_css_rule_t *rule = &web_css[i];
+        if (!web_css_selector_matches(rule->selector, tag, classes, id)) continue;
+        if (rule->color[0]) {
+            ctx->text_color = web_css_color(rule->color, ctx->text_color);
+            if (tag_is(tag, "body")) ctx->base_text_color = ctx->text_color;
+        }
+        if (rule->background[0] && tag_is(tag, "body")) {
+            gfx_fill_rect(ctx->page_left - 30, ctx->page_top,
+                          ctx->page_width + 60, ctx->page_height,
+                          web_css_color(rule->background, settings_panel()));
+        }
+        if (rule->font_px > 0) {
+            ctx->font = rule->font_px < 13 ? &font_ui_small :
+                        rule->font_px > 22 ? &font_h2 :
+                        rule->font_px > 18 ? &font_title : &font_ui;
+        }
+        if (rule->has_bold) {
+            ctx->bold = rule->bold;
+            if (ctx->font == &font_ui || ctx->font == &font_ui_bold)
+                ctx->font = rule->bold ? &font_ui_bold : &font_ui;
+        }
+        if (rule->hidden) hidden = true;
+    }
+    char inline_style[160];
+    web_tag_attribute(tag_body, "style", inline_style, sizeof(inline_style));
+    const char *p = inline_style;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == ';') p++;
+        const char *colon = p;
+        while (*colon && *colon != ':' && *colon != ';') colon++;
+        if (*colon != ':') break;
+        char key[32];
+        size_t kn = (size_t)(colon - p);
+        if (kn >= sizeof(key)) kn = sizeof(key) - 1;
+        kmemcpy(key, p, kn); key[kn] = 0; ktrim(key);
+        p = colon + 1;
+        while (*p == ' ' || *p == '\t') p++;
+        const char *end = p;
+        while (*end && *end != ';') end++;
+        char value[WEB_CSS_VALUE_SIZE];
+        size_t vn = (size_t)(end - p);
+        if (vn >= sizeof(value)) vn = sizeof(value) - 1;
+        kmemcpy(value, p, vn); value[vn] = 0; ktrim(value);
+        if (kstricmp(key, "color") == 0) {
+            ctx->text_color = web_css_color(value, ctx->text_color);
+            if (tag_is(tag, "body")) ctx->base_text_color = ctx->text_color;
+        } else if (kstricmp(key, "background-color") == 0 && tag_is(tag, "body")) {
+            gfx_fill_rect(ctx->page_left - 30, ctx->page_top,
+                          ctx->page_width + 60, ctx->page_height,
+                          web_css_color(value, settings_panel()));
+        } else if (kstricmp(key, "font-size") == 0 && kstrstr(value, "px")) {
+            int pixels = katoi(value);
+            if (pixels >= 8) ctx->font = pixels < 13 ? &font_ui_small : pixels > 22 ? &font_h2 : pixels > 18 ? &font_title : &font_ui;
+        } else if (kstricmp(key, "font-weight") == 0) {
+            ctx->bold = kstricmp(value, "normal") != 0;
+            if (ctx->font == &font_ui || ctx->font == &font_ui_bold)
+                ctx->font = ctx->bold ? &font_ui_bold : &font_ui;
+        } else if (kstricmp(key, "display") == 0 && kstricmp(value, "none") == 0) hidden = true;
+        p = *end ? end + 1 : end;
+    }
+    return hidden;
+}
+
 static void html_render(web_state_t *ws, const char *html, int px, int py, int pw, int ph) {
     html_ctx_t ctx;
     kmemset(&ctx, 0, sizeof(ctx));
@@ -239,6 +370,8 @@ static void html_render(web_state_t *ws, const char *html, int px, int py, int p
     ctx.x = ctx.page_left;
     ctx.y = 26;
     ctx.font = &font_ui;
+    ctx.text_color = settings_ink();
+    ctx.base_text_color = settings_ink();
     ctx.content_height = ctx.y;
     ws->link_count = 0;
 
@@ -414,6 +547,17 @@ static void html_render(web_state_t *ws, const char *html, int px, int py, int p
                     html_flush(&ctx, NULLPTR);
                     html_newline(&ctx);
                 }
+            }
+            if (!closing && web_css_apply_tag(name, tag_body, &ctx)) {
+                if (!tag_is(name, "img") && !tag_is(name, "br") && !tag_is(name, "hr") &&
+                    !tag_is(name, "input") && !tag_is(name, "meta") && !tag_is(name, "link")) {
+                    ctx.skip_tag = 1;
+                    kstrncpy(ctx.skip_name, name, sizeof(ctx.skip_name) - 1);
+                    ctx.skip_name[sizeof(ctx.skip_name) - 1] = 0;
+                }
+            } else if (closing) {
+                ctx.text_color = ctx.base_text_color;
+                if (ctx.font != &font_ui && ctx.font != &font_ui_bold) ctx.font = &font_ui;
             }
             p = q;
             continue;
@@ -669,6 +813,163 @@ static bool web_resolve_location(const char *base, const char *location,
     return web_make_url(secure, host, port, target, out, out_size);
 }
 
+static bool web_css_class_has(const char *classes, const char *wanted) {
+    size_t wanted_len = kstrlen(wanted);
+    const char *p = classes;
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        const char *start = p;
+        while (*p && *p != ' ' && *p != '\t') p++;
+        if ((size_t)(p - start) == wanted_len && kstrncmp(start, wanted, wanted_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool web_css_selector_matches(const char *selector, const char *tag,
+                                     const char *classes, const char *id) {
+    while (*selector == ' ' || *selector == '\t') selector++;
+    const char *last = selector;
+    for (const char *p = selector; *p; p++) {
+        if (*p == ' ' || *p == '>' || *p == '+') last = p + 1;
+    }
+    selector = last;
+    while (*selector == ' ' || *selector == '\t') selector++;
+    if (!*selector || *selector == '*') return true;
+    const char *dot = kstrchr(selector, '.');
+    const char *hash = kstrchr(selector, '#');
+    const char *end = selector + kstrlen(selector);
+    if (dot && dot < end) end = dot;
+    if (hash && hash < end) end = hash;
+    if (end != selector) {
+        char tag_name[24];
+        size_t n = (size_t)(end - selector);
+        if (n >= sizeof(tag_name)) return false;
+        kmemcpy(tag_name, selector, n);
+        tag_name[n] = 0;
+        if (kstricmp(tag_name, tag) != 0) return false;
+    }
+    if (dot) {
+        const char *finish = hash && hash > dot ? hash : selector + kstrlen(selector);
+        char class_name[64];
+        size_t n = (size_t)(finish - dot - 1);
+        if (!n || n >= sizeof(class_name)) return false;
+        kmemcpy(class_name, dot + 1, n);
+        class_name[n] = 0;
+        if (!web_css_class_has(classes, class_name)) return false;
+    }
+    if (hash) {
+        const char *finish = selector + kstrlen(selector);
+        char id_name[64];
+        size_t n = (size_t)(finish - hash - 1);
+        if (!n || n >= sizeof(id_name)) return false;
+        kmemcpy(id_name, hash + 1, n);
+        id_name[n] = 0;
+        if (kstrcmp(id, id_name) != 0) return false;
+    }
+    return true;
+}
+
+static void web_css_parse(const char *css) {
+    const char *p = css;
+    while (*p && web_css_count < WEB_CSS_RULES) {
+        const char *open = kstrchr(p, '{');
+        if (!open) break;
+        const char *close = kstrchr(open + 1, '}');
+        if (!close) break;
+        web_css_rule_t parsed;
+        kmemset(&parsed, 0, sizeof(parsed));
+        const char *d = open + 1;
+        while (d < close) {
+            while (d < close && (*d == ' ' || *d == '\t' || *d == '\r' || *d == '\n' || *d == ';')) d++;
+            const char *colon = d;
+            while (colon < close && *colon != ':' && *colon != ';') colon++;
+            if (colon >= close || *colon != ':') break;
+            char key[32];
+            size_t kn = (size_t)(colon - d);
+            if (kn >= sizeof(key)) kn = sizeof(key) - 1;
+            kmemcpy(key, d, kn); key[kn] = 0; ktrim(key);
+            d = colon + 1;
+            while (d < close && (*d == ' ' || *d == '\t')) d++;
+            const char *value = d;
+            while (d < close && *d != ';') d++;
+            char val[WEB_CSS_VALUE_SIZE];
+            size_t vn = (size_t)(d - value);
+            if (vn >= sizeof(val)) vn = sizeof(val) - 1;
+            kmemcpy(val, value, vn); val[vn] = 0; ktrim(val);
+            if (kstricmp(key, "color") == 0) kstrncpy(parsed.color, val, sizeof(parsed.color) - 1);
+            else if (kstricmp(key, "background") == 0 || kstricmp(key, "background-color") == 0)
+                kstrncpy(parsed.background, val, sizeof(parsed.background) - 1);
+            else if (kstricmp(key, "font-size") == 0) parsed.font_px = katoi(val);
+            else if (kstricmp(key, "font-weight") == 0) { parsed.bold = kstricmp(val, "normal") != 0; parsed.has_bold = true; }
+            else if (kstricmp(key, "display") == 0 && kstricmp(val, "none") == 0) parsed.hidden = true;
+            if (d < close) d++;
+        }
+        const char *s = p;
+        while (s < open && web_css_count < WEB_CSS_RULES) {
+            while (s < open && (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n' || *s == ',')) s++;
+            const char *e = s;
+            while (e < open && *e != ',') e++;
+            char selector[WEB_CSS_SELECTOR_SIZE];
+            size_t sn = (size_t)(e - s);
+            if (sn >= sizeof(selector)) sn = sizeof(selector) - 1;
+            kmemcpy(selector, s, sn); selector[sn] = 0; ktrim(selector);
+            if (selector[0] && selector[0] != '@') {
+                web_css[web_css_count] = parsed;
+                kstrncpy(web_css[web_css_count].selector, selector, sizeof(selector) - 1);
+                web_css_count++;
+            }
+            s = e + 1;
+        }
+        p = close + 1;
+    }
+}
+
+static void web_css_load_page(web_state_t *ws, const char *base_url) {
+    web_css_count = 0;
+    const char *p = ws->page;
+    int loaded = 0;
+    while (*p && loaded < 4) {
+        const char *style = kstrstr(p, "<style");
+        const char *link = kstrstr(p, "<link");
+        if (style && (!link || style < link)) {
+            const char *start = kstrchr(style, '>');
+            const char *end = start ? kstrstr(start + 1, "</style>") : NULLPTR;
+            if (!start || !end) { p = style + 6; continue; }
+            size_t n = (size_t)(end - start - 1);
+            if (n >= sizeof(web_css_buffer)) n = sizeof(web_css_buffer) - 1;
+            kmemcpy(web_css_buffer, start + 1, n); web_css_buffer[n] = 0;
+            web_css_parse(web_css_buffer);
+            p = end + 8;
+        } else if (link) {
+            const char *end = kstrchr(link, '>');
+            if (!end) break;
+            char tag[256];
+            size_t n = (size_t)(end - link);
+            if (n >= sizeof(tag)) n = sizeof(tag) - 1;
+            kmemcpy(tag, link, n); tag[n] = 0;
+            if (kstrstr(tag, "stylesheet")) {
+                char href[WEB_URL_SIZE], url[WEB_URL_SIZE];
+                extract_href(tag, href, sizeof(href));
+                if (href[0] && web_resolve_location(base_url, href, url, sizeof(url))) {
+                    char host[256], path[WEB_URL_SIZE]; uint16_t port; bool secure; int status = 0;
+                    if (web_parse_url(url, host, sizeof(host), &port, path, sizeof(path), &secure)) {
+                        int bytes = secure ? net_https_get(host, port, path, web_css_buffer, sizeof(web_css_buffer) - 1, NULLPTR, 0, &status)
+                                           : net_http_get(host, port, path, web_css_buffer, sizeof(web_css_buffer) - 1, NULLPTR, 0, &status);
+                        if (bytes > 0 && status >= 200 && status < 300) {
+                            web_css_buffer[bytes] = 0;
+                            web_css_parse(web_css_buffer);
+                            loaded++;
+                        }
+                    }
+                }
+            }
+            p = end + 1;
+        } else break;
+    }
+}
+
 static void web_fetch_page(web_state_t *ws, const char *url) {
     if (!net_ready()) {
         set_error_page(ws, "No network adapter",
@@ -783,6 +1084,7 @@ static void web_navigate(web_state_t *ws, const char *input, bool record_history
                        "Use bordify://home, bordify://guide or an https:// address.");
     }
 
+    web_css_load_page(ws, ws->url);
     if (record_history) {
         web_push_history(ws, url);
     }
