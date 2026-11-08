@@ -74,6 +74,23 @@ int compat_arm64_workload_run(void) {
     kprintf("[arm64] extended clang-assembled Mach-O rejected or failed\n");
     return -1;
 }
+/* Genuine C-compiled ARM64 Mach-O, independent of handcrafted opcodes.
+ * A volatile checksum loop uses guest stack memory and condition flags.
+ */
+int compat_arm64_c_run(void) {
+    uint32_t length=load_demo("ARMCALC.MCH");
+    a64_report_t result;
+    if (length && a64_macho_run_darwin(file_data,length,
+                                       arm_memory,sizeof(arm_memory),
+                                       serial_bytes,NULLPTR,&result) &&
+        result.finished && result.exit_code==0 && result.steps>45) {
+        kprintf("[arm64] clang-compiled freestanding C Mach-O checksum passed; %u steps, exit %d\n",
+                result.steps,result.exit_code);
+        return 0;
+    }
+    kprintf("[arm64] compiled C checksum guest rejected or failed\n");
+    return -1;
+}
 /* Only this audited setup may commit C:\\APP64.EXE to /APPS/APP64.EXE.
  * Never expose a general guest-controlled FAT16 path or kernel file handle. */
 static uint8_t installed_verify[8192];
@@ -126,5 +143,6 @@ void compat_vm_demos(void) {
     compat_win64_installer_run();
     compat_darwin_demo_run();
     compat_arm64_workload_run();
+    compat_arm64_c_run();
     dmg_install_demo();
 }
