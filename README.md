@@ -60,6 +60,30 @@ The experimental branch now also includes **two 64-bit compatibility proofs**:
 Both demos have host-side tests and QEMU boot checks. They can also be
 launched from the Files app's Apps directory.
 
+**Darwin/Cocoa Objective-C lifecycle test gate (green):**
+`APPS/COCOA.MCH` is a real Clang-assembled ARM64 Mach-O that imports
+`_objc_getClass`, `_sel_registerName`, and `_objc_msgSend` as unresolved
+symbols. A new **restricted static Mach-O binder** validates its symbol
+table and ARM64 branch relocations, then constructs a checked opt-in
+Bordify `LC_NOTE` binding table. The guest executes its regular ARM64
+`BL` calls using the Objective-C `x0/x1/x2` ABI; the interpreter
+dispatches only the three allowed symbols.
+
+The runtime models `NSString` string creation/UTF-8/length,
+`NSWindow` creation/title/visibility, and `NSApplication`
+shared application/start/running/terminate lifecycle. The sample
+performs **25 linked Objective-C calls**, prints its NSString through
+Darwin-style `write`, and exits zero. Unit tests reject malformed
+imports, unknown classes, bad object receivers, and infinite guest
+loops; GitHub Actions verifies the behavior in x86 QEMU, including
+desktop startup. Open **Files → Apps → COCOA.MCH** to repeat the demo.
+
+**This is NOT genuine Cocoa GUI support.** The modeled window does
+not render on screen, the `run` method is nonblocking, and neither
+Apple dyld, libobjc, Swift nor real Foundation/AppKit is implemented.
+Arbitrary macOS applications and bundles still do not run. Green
+applies **only to the audited ObjC ABI lifecycle test**.
+
 **Windows compatibility runtime: native Win32 file I/O test gate (green):**
 `APPS/WINIO.EXE` is a real x86 PE32 program running as a ring-3 user
 process with seven recognized `kernel32.dll` imports: `ExitProcess`,
