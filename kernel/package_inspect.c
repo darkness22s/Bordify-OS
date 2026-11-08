@@ -116,7 +116,7 @@ const char *package_format_name(package_format_t format) {
 const char *package_compatibility_note(package_format_t format) {
     switch (format) {
         case PACKAGE_DMG_UDIF:
-            return "DMG mount/extraction requires UDIF block maps and an APFS/HFS+ reader.";
+            return "Limited raw/zlib sector inspection exists; mounting requires full UDIF maps and APFS/HFS+.";
         case PACKAGE_PKG_XAR:
             return "PKG installation requires XAR extraction and macOS installer semantics.";
         case PACKAGE_OLE_CONTAINER:
