@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <zlib.h>
 #include "udif_blkx.h"
 
 #define HEADER 204
@@ -96,10 +97,31 @@ int main(void) {
     assert(map.runs_count == 2);
     assert(!udif_blkx_from_xml("<plist>oops</plist>", 19, 64, 4096, &map));
 
-    fixture(table); b32(table + HEADER + CHUNK, 0x80000005u);
-    b64(table + HEADER + CHUNK + 32, 200);
+    /* Verify true zlib-compressed blkx data, not just raw/zero runs. */
+    uint8_t original[1024];
+    memcpy(original, image + disk_offset, sizeof(original));
+    uLongf encoded_length = 2048;
+    assert(compress2(image + disk_offset, &encoded_length,
+                     original, sizeof(original), Z_BEST_COMPRESSION) == Z_OK);
+    fixture(table);
+    b32(table + HEADER + CHUNK, 0x80000005u);
+    b64(table + HEADER + CHUNK + 32, encoded_length);
     assert(udif_blkx_parse(table, sizeof(table), 64, 4096, &map));
     assert(map.has_compressed);
+    assert(udif_blkx_read_sector(&map, 6, reader, &reader_context,
+                                 sector) == UDIF_IO_OK);
+    assert(!memcmp(sector, original, 512));
+    assert(udif_blkx_read_sector(&map, 7, reader, &reader_context,
+                                 sector) == UDIF_IO_OK);
+    assert(!memcmp(sector, original + 512, 512));
+    image[disk_offset + (size_t)encoded_length - 1] ^= 0x40;
+    assert(udif_blkx_read_sector(&map, 6, reader, &reader_context,
+                                 sector) == UDIF_IO_ERROR);
+    image[disk_offset + (size_t)encoded_length - 1] ^= 0x40;
+
+    /* Other compressed UDIF algorithms still require separate decoders. */
+    b32(table + HEADER + CHUNK, 0x80000006u);
+    assert(udif_blkx_parse(table, sizeof(table), 64, 4096, &map));
     assert(udif_blkx_read_sector(&map, 6, reader, &reader_context,
                                  sector) == UDIF_IO_UNSUPPORTED);
 
@@ -113,6 +135,6 @@ int main(void) {
     assert(!udif_blkx_parse(table, sizeof(table), 64, 4096, &map));
     fixture(table); table[0] = 'X';
     assert(!udif_blkx_parse(table, sizeof(table), 64, 4096, &map));
-    puts("UDIF blkx map/raw-sector tests: PASS");
+    puts("UDIF blkx map/raw/zlib-sector tests: PASS");
     return 0;
 }
