@@ -57,6 +57,7 @@ bool hfsplus_mount_readonly(hfsplus_mount_t *out,
     temp.catalog_start_sector=catalog_sector;
     temp.catalog_bytes=volume.catalog_logical_size;
     temp.allocation_block_bytes=volume.block_size;
+    temp.total_allocation_blocks=volume.total_blocks;
     temp.root_node=cat.root_node;
     temp.node_bytes=cat.node_size;
     temp.file_count=cat.leaf_records;
@@ -116,7 +117,8 @@ bool hfsplus_find_root_file(const hfsplus_mount_t *m,
         uint32_t blocks=be32(fork+20);
         if (!logical || logical>HFSPLUS_MAX_EXTRACT ||
             !total || !blocks || blocks>total || first==0 ||
-            blocks>(UINT32_MAX-first) ||
+            first>=m->total_allocation_blocks ||
+            blocks>m->total_allocation_blocks-first ||
             logical>(uint64_t)blocks*m->allocation_block_bytes ||
             (uint64_t)(first+blocks)*
                 (m->allocation_block_bytes/512u)>m->map->sector_count)
@@ -139,6 +141,10 @@ bool hfsplus_read_file(const hfsplus_mount_t *m,
         !file->size || file->size>HFSPLUS_MAX_EXTRACT ||
         file->size>cap || !file->extent_blocks ||
         !m->allocation_block_bytes ||
+        !m->total_allocation_blocks ||
+        file->first_block==0 ||
+        file->first_block>=m->total_allocation_blocks ||
+        file->extent_blocks>m->total_allocation_blocks-file->first_block ||
         (uint64_t)file->size>
             (uint64_t)file->extent_blocks*m->allocation_block_bytes)
         return false;
