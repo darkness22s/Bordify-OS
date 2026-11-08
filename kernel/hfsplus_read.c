@@ -23,6 +23,40 @@ static bool read_sector(const hfsplus_mount_t *m, uint64_t relative,
     return udif_blkx_read_sector(m->map,m->map->sector_start+relative,
                                   m->reader,m->context,out)==UDIF_IO_OK;
 }
+/* HFS+ allocation bitmap: MSB-first bit per allocation block.
+ * Deliberately support only bitmap data reachable via the first extent,
+ * and reject volumes requiring bitmap overflow extents. */
+static bool allocated_blocks(const hfsplus_mount_t *m,
+                             uint32_t first, uint32_t count) {
+    if (!m || !m->map || !m->reader || !m->bitmap_extent_blocks ||
+        !m->allocation_block_bytes ||
+        !count || first >= m->total_allocation_blocks ||
+        count > m->total_allocation_blocks-first) return false;
+    uint64_t bitmap_sectors=(uint64_t)m->bitmap_extent_blocks *
+                             (m->allocation_block_bytes/512u);
+    uint64_t base=(uint64_t)m->bitmap_first_block *
+                   (m->allocation_block_bytes/512u);
+    uint64_t first_byte=first/8u;
+    uint64_t last_byte=((uint64_t)first+count-1u)/8u;
+    if (last_byte >= bitmap_sectors*512u ||
+        base>=m->map->sector_count ||
+        bitmap_sectors>m->map->sector_count-base) return false;
+    uint8_t sector[512];
+    uint64_t previous=UINT64_MAX;
+    for (uint32_t block=first; block<first+count; ++block) {
+        uint64_t byte_index=block/8u;
+        uint64_t at=byte_index/512u;
+        if (at!=previous) {
+            if (!read_sector(m,base+at,sector)) return false;
+            previous=at;
+        }
+        if (!(sector[byte_index%512u] & (0x80u >> (block%8u))))
+            return false;
+    }
+    (void)first_byte;
+    return true;
+}
+
 bool hfsplus_mount_readonly(hfsplus_mount_t *out,
                              const udif_block_map_t *map,
                              udif_reader_t reader, void *context) {
@@ -57,10 +91,29 @@ bool hfsplus_mount_readonly(hfsplus_mount_t *out,
     temp.catalog_start_sector=catalog_sector;
     temp.catalog_bytes=volume.catalog_logical_size;
     temp.allocation_block_bytes=volume.block_size;
+    /* Allocation-file fork starts at volume header offset 112.
+     * Reject malformed/fragmented bitmaps rather than trusting file extents. */
+    uint32_t bitmap_total, bitmap_first, bitmap_extent;
+    /* sector currently contains the catalog B-tree header; reload volume. */
+    if (!read_sector(&temp,2,sector)) return false;
+    bitmap_total=be32(sector+124);
+    bitmap_first=be32(sector+128);
+    bitmap_extent=be32(sector+132);
+    if (!bitmap_first || !bitmap_extent ||
+        bitmap_total!=bitmap_extent ||
+        bitmap_first>=volume.total_blocks ||
+        bitmap_extent>volume.total_blocks-bitmap_first ||
+        (uint64_t)bitmap_extent*volume.block_size*8u <
+            volume.total_blocks) return false;
+    temp.bitmap_first_block=bitmap_first;
+    temp.bitmap_extent_blocks=bitmap_extent;
     temp.total_allocation_blocks=volume.total_blocks;
     temp.root_node=cat.root_node;
     temp.node_bytes=cat.node_size;
     temp.file_count=cat.leaf_records;
+    if (!allocated_blocks(&temp,bitmap_first,bitmap_extent) ||
+        !allocated_blocks(&temp,volume.catalog_first_block,
+                           volume.catalog_extent_blocks)) return false;
     *out=temp;
     return true;
 }
@@ -123,6 +176,7 @@ bool hfsplus_find_root_file(const hfsplus_mount_t *m,
             (uint64_t)(first+blocks)*
                 (m->allocation_block_bytes/512u)>m->map->sector_count)
             return false;
+        if (!allocated_blocks(m,first,blocks)) return false;
         file->file_id=be32(node+record+8);
         if (file->file_id<16) return false;
         file->first_block=first;
@@ -147,6 +201,8 @@ bool hfsplus_read_file(const hfsplus_mount_t *m,
         file->extent_blocks>m->total_allocation_blocks-file->first_block ||
         (uint64_t)file->size>
             (uint64_t)file->extent_blocks*m->allocation_block_bytes)
+        return false;
+    if (!allocated_blocks(m,file->first_block,file->extent_blocks))
         return false;
     uint64_t base=(uint64_t)file->first_block *
                    (m->allocation_block_bytes/512u);
