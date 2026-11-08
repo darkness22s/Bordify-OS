@@ -69,7 +69,9 @@ static bool win32_save_file(const uint8_t *data,size_t count,void *context) {
 #endif
         return false;
     }
+#ifdef BORDIFY_CHROME_PROBE
     uint32_t free_before=fat16_free_clusters();
+#endif
     int stored=fat16_write(apps.cluster,"WIN32.TXT",data,(uint32_t)count);
     bool found=fat16_find(apps.cluster,"WIN32.TXT",&entry);
 #ifdef BORDIFY_CHROME_PROBE
