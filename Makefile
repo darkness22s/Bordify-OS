@@ -25,11 +25,15 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/armhello.mch
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch
 
 $(BUILD)/apps/armhello.mch: tools/genarm64demo.py
 	@mkdir -p $(BUILD)/apps
 	$(PYTHON) tools/genarm64demo.py $@
+
+$(BUILD)/apps/hfsplus.dmg: tools/genudifdemo.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genudifdemo.py $@ --hfsplus
 
 $(BUILD)/apps/zdmg.dmg: tools/genudifdemo.py
 	@mkdir -p $(BUILD)/apps
@@ -111,13 +115,18 @@ $(BUILD)/tests/a64_macho_test: tests/a64_macho_test.c kernel/a64_macho.c kernel/
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/a64_macho_test.c kernel/a64_macho.c -o $@
 
-test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test
+$(BUILD)/tests/hfsplus_probe_test: tests/hfsplus_probe_test.c kernel/hfsplus_probe.c kernel/hfsplus_probe.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/hfsplus_probe_test.c kernel/hfsplus_probe.c -o $@
+
+test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
 	./$(BUILD)/tests/exec_inspect_test
 	./$(BUILD)/tests/package_inspect_test
 	./$(BUILD)/tests/win32_pe_test
 	./$(BUILD)/tests/udif_blkx_test
 	./$(BUILD)/tests/a64_macho_test
 	./$(BUILD)/tests/zlib_inflate_test
+	./$(BUILD)/tests/hfsplus_probe_test
 
 clean:
 	rm -rf $(BUILD) dist
