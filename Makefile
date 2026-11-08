@@ -25,7 +25,11 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe
+
+$(BUILD)/apps/winhello.exe: tools/genwin32demo.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genwin32demo.py $@
 
 $(BUILD)/apps/fault.o: apps/fault.S
 	@mkdir -p $(BUILD)/apps
@@ -79,9 +83,14 @@ $(BUILD)/tests/package_inspect_test: tests/package_inspect_test.c kernel/package
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/package_inspect_test.c kernel/package_inspect.c -o $@
 
-test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test
+$(BUILD)/tests/win32_pe_test: tests/win32_pe_test.c kernel/win32_pe.c kernel/win32_pe.h $(BUILD)/apps/winhello.exe
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_pe_test.c kernel/win32_pe.c -o $@
+
+test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test
 	./$(BUILD)/tests/exec_inspect_test
 	./$(BUILD)/tests/package_inspect_test
+	./$(BUILD)/tests/win32_pe_test
 
 clean:
 	rm -rf $(BUILD) dist
