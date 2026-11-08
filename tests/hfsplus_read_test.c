@@ -90,9 +90,9 @@ int main(void) {
     volume[leaf+8]=0; /* invalid B-tree leaf */
     assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     volume[leaf+8]=0xff;
-    volume[leaf+510]=0; /* invalid record offset */
+    volume[leaf+511]=0; /* invalid record offset (low byte) */
     assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
-    volume[leaf+510]=14;
+    volume[leaf+511]=14;
     volume[leaf+14+2+3]=7; /* parentID no longer root */
     assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     volume[leaf+14+2+3]=2;
