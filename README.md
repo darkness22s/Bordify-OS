@@ -43,8 +43,9 @@ The draft compatibility branch includes a real isolated ELF32 demo
 (`APPS/HELLO.ELF`), a tiny Windows PE32 console executable
 (`APPS/WINHELLO.EXE`) using four limited `kernel32.dll` bridges,
 a small **interpreted** Apple Silicon Mach-O demonstration
-(`APPS/ARMHELLO.MCH`), and read-only raw/zero-sector extraction from
-a synthetic UDIF image (`APPS/DMGDEMO.DMG`). All four are checked by
+(`APPS/ARMHELLO.MCH`), and read-only raw/zero and bounded zlib-compressed UDIF sector
+access using synthetic disk images (`APPS/DMGDEMO.DMG`, `APPS/ZDMG.DMG`).
+These demonstrations are checked by
 QEMU CI. The ARM64 guest demo uses a **custom test ABI**, not Darwin.
 
 This **does not** run Windows x64 installers or arbitrary .exe files,
