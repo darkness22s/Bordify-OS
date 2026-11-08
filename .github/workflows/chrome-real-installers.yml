@@ -1,0 +1,127 @@
+name: Real Chrome EXE and macOS DMG guest compatibility experiment
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/chrome-real-installers.yml"
+      - "kernel/chrome_trial.*"
+      - "kernel/kmain.c"
+      - "Makefile"
+      - "tools/chrome_real_preflight.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-real-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chrome-qemu-attempt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bordify kernel, FAT16 and QEMU build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-multilib nasm python3-pil fonts-dejavu-core \
+            dosfstools mtools parted grub-pc-bin grub-common qemu-utils \
+            qemu-system-x86 xz-utils zlib1g-dev
+
+      - name: Test and compile CURRENT Bordify branch with opt-in Chrome probe
+        run: |
+          make test
+          make -j"$(nproc)" CHROME_PROBE=1
+
+      - name: Assemble the current bootable Bordify image
+        run: sudo bash scripts/build-image.sh
+
+      - name: Download real official Chrome installers (never commit or upload them)
+        run: |
+          set -euo pipefail
+          mkdir -p build/google
+          curl --fail --show-error --silent --location --retry 3 \
+            --retry-delay 5 --connect-timeout 20 --max-time 360 \
+            --output build/google/ChromeStandaloneSetup64.exe \
+            https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe
+          curl --fail --show-error --silent --location --retry 3 \
+            --retry-delay 5 --connect-timeout 20 --max-time 360 \
+            --output build/google/googlechrome.dmg \
+            https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg
+          ls -lh build/google/
+
+      - name: Check real PE and UDIF metadata and record SHA-256
+        run: |
+          python3 tools/chrome_real_preflight.py \
+            --win build/google/ChromeStandaloneSetup64.exe \
+            --mac build/google/googlechrome.dmg \
+            --json build/chrome-preflight.json \
+            --markdown build/chrome-report.md
+          cat build/chrome-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Insert actual Chrome EXE and DMG into QEMU FAT16 disk
+        run: |
+          set -euo pipefail
+          sudo chmod a+r dist/Bordify-OS.img
+          cp --sparse=always dist/Bordify-OS.img build/chrome-trial.img
+          mcopy -i "build/chrome-trial.img@@1048576" \
+            build/google/ChromeStandaloneSetup64.exe "::APPS/CHROME.EXE"
+          mcopy -i "build/chrome-trial.img@@1048576" \
+            build/google/googlechrome.dmg "::APPS/CHROME.DMG"
+          mdir -i "build/chrome-trial.img@@1048576" "::APPS"
+
+      - name: Boot Bordify in QEMU and attempt both genuine packages
+        run: |
+          set -euo pipefail
+          set +e
+          timeout --signal=TERM 150s qemu-system-i386 \
+            -drive file=build/chrome-trial.img,format=raw,if=ide \
+            -nic user,model=e1000 -m 128 -vga std -display none \
+            -serial file:build/chrome-guest-serial.log \
+            -no-reboot -no-shutdown \
+            >build/chrome-qemu-output.log 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 124 ]; then
+            cat build/chrome-qemu-output.log
+            exit "$code"
+          fi
+          cat build/chrome-guest-serial.log
+          grep -F "[chrome-test] genuine Chrome Windows+macOS compatibility experiment" build/chrome-guest-serial.log
+          grep -F "[chrome-win] real installer size=" build/chrome-guest-serial.log
+          grep -F "[chrome-win] native PE32 launch attempt rejected" build/chrome-guest-serial.log
+          grep -F "[chrome-mac] real DMG size=" build/chrome-guest-serial.log
+          grep -F "[chrome-mac] app launch rejected:" build/chrome-guest-serial.log
+          grep -F "[chrome-test] experiment complete; no Chrome application launched" build/chrome-guest-serial.log
+          grep -F "[kernel] starting desktop" build/chrome-guest-serial.log
+          if grep -F "PANIC" build/chrome-guest-serial.log; then
+            echo "Kernel panic during actual Chrome installer experiment"
+            exit 1
+          fi
+          {
+            echo ""
+            echo "### Bordify x86-QEMU actual Chrome launch attempts"
+            echo '~~~'
+            grep -E '^\[chrome-(test|win|mac)\]' build/chrome-guest-serial.log
+            echo '~~~'
+            echo ""
+            echo "**Result:** Windows Chrome and macOS Chrome were NOT launched."
+            echo "The experiment succeeds when Bordify rejects unsupported binaries safely and boots its desktop."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence (logs and hashes only, NO Chrome binaries)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-real-compatibility-evidence
+          path: |
+            build/chrome-guest-serial.log
+            build/chrome-qemu-output.log
+            build/chrome-preflight.json
+            build/chrome-report.md
+          if-no-files-found: warn
+          retention-days: 14
