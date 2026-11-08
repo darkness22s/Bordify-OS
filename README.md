@@ -41,7 +41,8 @@ and uptime information, plus Restart and Power off controls.
 
 The draft compatibility branch includes a real isolated ELF32 demo
 (`APPS/HELLO.ELF`), a tiny Windows PE32 console executable
-(`APPS/WINHELLO.EXE`) using four limited `kernel32.dll` bridges,
+(`APPS/WINHELLO.EXE`) and a constrained Win32 disk-I/O executable
+(`APPS/WINIO.EXE`) using seven `kernel32.dll` bridge functions,
 a small **interpreted** Apple Silicon Mach-O demonstration
 (`APPS/ARMHELLO.MCH`), and read-only raw/zero and bounded zlib-compressed UDIF sector
 access using synthetic disk images (`APPS/DMGDEMO.DMG`, `APPS/ZDMG.DMG`).
@@ -58,6 +59,27 @@ The experimental branch now also includes **two 64-bit compatibility proofs**:
 
 Both demos have host-side tests and QEMU boot checks. They can also be
 launched from the Files app's Apps directory.
+
+**Windows compatibility runtime: native Win32 file I/O test gate (green):**
+`APPS/WINIO.EXE` is a real x86 PE32 program running as a ring-3 user
+process with seven recognized `kernel32.dll` imports: `ExitProcess`,
+`GetStdHandle`, `WriteFile`, `GetLastError`, `CreateFileA`,
+`ReadFile`, and `CloseHandle`.
+
+It uses Windows stdcall API stubs to create the strictly allowed
+`C:\\BORDIFY\\WIN32.TXT` destination, writes a message through
+`WriteFile`, closes the handle to commit the data to Bordify FAT16,
+reopens and reads the file, compares bytes inside ring 3, then prints
+a success message and exits. Host tests reject bad file names, invalid
+handles, invalid user memory and oversized writes. QEMU CI extracts
+`APPS/WIN32.TXT` from the *persistent* disk image and checks its
+contents byte-for-byte. Run it through **Files → Apps → WINIO.EXE**.
+
+This green status is for **one audited native Win32 file-I/O workflow**,
+not for Windows desktop compatibility in general. The user-mode
+runtime still lacks arbitrary Windows programs, DLL loading, GUI,
+threading, registry, general NT filesystem/handle semantics and
+production-strength process sandboxing.
 
 **Apple Silicon execution: compiled ARM64 Mach-O workload test gate (green):**
 Bordify now interprets more AArch64 instructions, including 32/64-bit
