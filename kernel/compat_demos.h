@@ -6,4 +6,5 @@ int compat_win64_installer_run(void);
 int compat_win64_installed_run(void);
 int compat_darwin_demo_run(void);
 int compat_arm64_workload_run(void);
+int compat_arm64_c_run(void);
 #endif
