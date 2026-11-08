@@ -88,6 +88,13 @@ void kernel_main(uint32_t mb_info_address) {
         }
     }
 
+    if (fat16_mounted()) {
+        int win32_result = process_run_win32_pe("APPS", "WINHELLO.EXE");
+        if (win32_result != 0) {
+            kprintf("[win32] demo failed (status %d)\n", win32_result);
+        }
+    }
+
     gui_init();
     kprintf("[kernel] starting desktop\n");
     desktop_run();
