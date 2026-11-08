@@ -96,6 +96,8 @@ jobs:
           echo "Persistent Windows x64 PE32+ installer test: PASS"
           grep -F "BORDIFY DARWIN: NSString objc_msgSend and BSD write on ARM64" build/qemu-serial.log
           grep -F "[darwin] ARM64 BSD syscall and NSString/NSApplication bridge verified; exited 0" build/qemu-serial.log
+          grep -F "BORDIFY COCOA: NSString NSWindow NSApplication lifecycle verified" build/qemu-serial.log
+          grep -F "[darwin-cocoa] ARM64 ObjC-linked NSString/NSWindow/NSApplication lifecycle passed; 25 imports, exit 0" build/qemu-serial.log
           grep -F "[kernel] starting desktop" build/qemu-serial.log
           if grep -q "PANIC" build/qemu-serial.log; then
             echo "Kernel panic during boot smoke test"
