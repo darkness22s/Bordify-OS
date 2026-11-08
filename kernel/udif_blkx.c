@@ -1,4 +1,5 @@
 #include "udif_blkx.h"
+#include "zlib_inflate.h"
 
 /*
  * UDIF block-map format: 204-byte big-endian 'mish' header, then
@@ -198,15 +199,50 @@ udif_io_result_t udif_blkx_read_sector(const udif_block_map_t *map,
             zero(output, UDIF_SECTOR_SIZE);
             return UDIF_IO_OK;
         }
-        if (run->type != 1) return UDIF_IO_UNSUPPORTED;
-        uint64_t within = (relative - run->sector) * UDIF_SECTOR_SIZE;
-        if (!inside(run->offset, within + UDIF_SECTOR_SIZE, UINT64_MAX) ||
-            !inside(map->data_offset,
-                    run->offset + within + UDIF_SECTOR_SIZE, UINT64_MAX))
+        if (run->type != 1 && run->type != 0x80000005u)
+            return UDIF_IO_UNSUPPORTED;
+        uint64_t relative_sector = relative - run->sector;
+        if (relative_sector > UINT64_MAX / UDIF_SECTOR_SIZE)
             return UDIF_IO_BAD_RANGE;
-        uint64_t physical = map->data_offset + run->offset + within;
-        return reader(context, physical, output, UDIF_SECTOR_SIZE) ==
-               (int)UDIF_SECTOR_SIZE ? UDIF_IO_OK : UDIF_IO_ERROR;
+        uint64_t within = relative_sector * UDIF_SECTOR_SIZE;
+        if (run->type == 1) {
+            if (!inside(run->offset, within, UINT64_MAX) ||
+                !inside(map->data_offset, run->offset + within,
+                        UINT64_MAX))
+                return UDIF_IO_BAD_RANGE;
+            uint64_t physical = map->data_offset + run->offset + within;
+            return reader(context, physical, output, UDIF_SECTOR_SIZE) ==
+                   (int)UDIF_SECTOR_SIZE ? UDIF_IO_OK : UDIF_IO_ERROR;
+        }
+
+        /*
+         * UDIF run type 0x80000005 stores an RFC1950 zlib stream
+         * holding one or more entire logical sectors. Keep the maximum
+         * decompressed and compressed sizes bounded to 1 MiB each.
+         * This path is read-only; no arbitrary bytes are executed.
+         */
+        #define UDIF_ZLIB_MAX_CHUNK (1024u * 1024u)
+        static uint8_t compressed[UDIF_ZLIB_MAX_CHUNK];
+        static uint8_t inflated[UDIF_ZLIB_MAX_CHUNK];
+        if (run->sectors == 0 ||
+            run->sectors > UDIF_ZLIB_MAX_CHUNK / UDIF_SECTOR_SIZE ||
+            run->length < 6 || run->length > UDIF_ZLIB_MAX_CHUNK)
+            return UDIF_IO_UNSUPPORTED;
+        uint64_t expected = run->sectors * UDIF_SECTOR_SIZE;
+        if (within > expected || expected - within < UDIF_SECTOR_SIZE)
+            return UDIF_IO_BAD_RANGE;
+        if (!inside(map->data_offset, run->offset, UINT64_MAX))
+            return UDIF_IO_BAD_RANGE;
+        uint64_t physical = map->data_offset + run->offset;
+        if (reader(context, physical, compressed, (size_t)run->length) !=
+            (int)run->length) return UDIF_IO_ERROR;
+        size_t written = 0;
+        if (!zlib_inflate_bounded(compressed, (size_t)run->length, inflated,
+                                   (size_t)expected, &written) ||
+            written != expected) return UDIF_IO_ERROR;
+        for (unsigned i = 0; i < UDIF_SECTOR_SIZE; ++i)
+            output[i] = inflated[(size_t)within + i];
+        return UDIF_IO_OK;
     }
     return UDIF_IO_BAD_RANGE;
 }
