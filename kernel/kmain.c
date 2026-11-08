@@ -81,6 +81,11 @@ void kernel_main(uint32_t mb_info_address) {
         if (result != 0) {
             kprintf("[process] demo failed (status %d)\n", result);
         }
+        /* An isolated page fault must NOT panic the kernel. */
+        int fault_result = process_run_elf32("APPS", "FAULT.ELF");
+        if (fault_result != -1) {
+            kprintf("[process] unexpected fault-test result %d\n", fault_result);
+        }
     }
 
     gui_init();
