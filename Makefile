@@ -6,6 +6,7 @@ CFLAGS := -m32 -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
           -fno-common -fno-strict-aliasing -mno-sse -mno-sse2 -mno-mmx -mno-3dnow \
           -fno-asynchronous-unwind-tables -fno-unwind-tables -Iinclude \
           -Ithird_party/bearssl/inc -Ithird_party/bearssl/src
+KERNEL_CFLAGS := $(CFLAGS) -Ikernel
 BEARSSL_CFLAGS := -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 \
                   -DBR_USE_WIN32_RAND=0 -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_TIME=0 \
                   -DBR_RDRAND=0 -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_POWER8=0 \
@@ -30,11 +31,11 @@ $(BUILD)/font.c: tools/genfont.py
 	$(PYTHON) tools/genfont.py $@
 
 $(BUILD)/font.o: $(BUILD)/font.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 
 $(BUILD)/kernel/%.o: kernel/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(KERNEL_CFLAGS) -c $< -o $@
 
 $(BUILD)/boot/%.o: boot/%.S
 	@mkdir -p $(dir $@)
