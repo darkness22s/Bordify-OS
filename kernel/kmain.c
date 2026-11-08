@@ -20,6 +20,7 @@
 #include "icons.h"
 #include "process.h"
 #include "udif_demo.h"
+#include "a64_demo.h"
 
 extern uint8_t kernel_end;
 
@@ -76,6 +77,7 @@ void kernel_main(uint32_t mb_info_address) {
     }
 
     udif_demo_probe();
+    a64_demo_run();
     process_init();
     if (fat16_mounted()) {
         /* Boot-time end-to-end test: runs from FAT16 at CPL3, not in kernel. */
