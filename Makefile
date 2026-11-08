@@ -26,7 +26,7 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch $(BUILD)/apps/mount.dmg $(BUILD)/apps/armwork.mch $(BUILD)/apps/armcalc.mch
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/winio.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch $(BUILD)/apps/mount.dmg $(BUILD)/apps/armwork.mch $(BUILD)/apps/armcalc.mch
 
 $(BUILD)/apps/win64setup.exe: tools/genwin64setup.py $(BUILD)/apps/win64demo.exe
 	@mkdir -p $(BUILD)/apps
@@ -73,6 +73,10 @@ $(BUILD)/apps/zdmg.dmg: tools/genudifdemo.py
 $(BUILD)/apps/dmgdemo.dmg: tools/genudifdemo.py
 	@mkdir -p $(BUILD)/apps
 	$(PYTHON) tools/genudifdemo.py $@
+
+$(BUILD)/apps/winio.exe: tools/genwin32io.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genwin32io.py $@
 
 $(BUILD)/apps/winhello.exe: tools/genwin32demo.py
 	@mkdir -p $(BUILD)/apps
@@ -134,6 +138,10 @@ $(BUILD)/tests/win32_pe_test: tests/win32_pe_test.c kernel/win32_pe.c kernel/win
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_pe_test.c kernel/win32_pe.c -o $@
 
+$(BUILD)/tests/win32_files_test: tests/win32_files_test.c kernel/win32_pe.c kernel/win32_files.c kernel/win32_files.h $(BUILD)/apps/winio.exe
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_files_test.c kernel/win32_pe.c kernel/win32_files.c -o $@
+
 $(BUILD)/tests/udif_blkx_test: tests/udif_blkx_test.c kernel/udif_blkx.c kernel/udif_blkx.h kernel/zlib_inflate.c kernel/zlib_inflate.h
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/udif_blkx_test.c kernel/udif_blkx.c kernel/zlib_inflate.c -lz -o $@
@@ -174,7 +182,8 @@ $(BUILD)/tests/hfsplus_read_test: tests/hfsplus_read_test.c kernel/hfsplus_read.
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/hfsplus_read_test.c kernel/hfsplus_read.c kernel/hfsplus_probe.c kernel/udif_blkx.c kernel/zlib_inflate.c kernel/package_inspect.c -lz -o $@
 
-test: $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+test: $(BUILD)/tests/win32_files_test $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+	./$(BUILD)/tests/win32_files_test
 	./$(BUILD)/tests/a64_c_test
 	./$(BUILD)/tests/a64_workload_test
 	./$(BUILD)/tests/hfsplus_read_test
