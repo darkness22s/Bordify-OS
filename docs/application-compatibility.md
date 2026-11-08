@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32 + a restricted Win32 PE32 console runtime demonstrated in QEMU**. Windows x64 installers, macOS DMG installation, Apple Silicon and Darwin/Cocoa applications are **NOT** supported.
+Status: **native ELF32 + a restricted Win32 PE32 console runtime demonstrated in QEMU**. Windows x64 installers, macOS DMG installation, general Apple Silicon and Darwin/Cocoa applications are **NOT** supported.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is no user-process model, virtual address-space isolation, syscall ABI, dynamic linker, 64-bit CPU mode, or general-purpose executable loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -48,6 +48,12 @@ The Files app now has an Apps sidebar shortcut. Double-click `APPS/HELLO.ELF` to
 - Build an **ELF32 native Bordify ABI** first and run a minimal hello-world user program as a smoke test. Keep drivers and GUI in trusted components.
 - Add a VFS that preserves long filenames and file metadata. FAT16 may remain boot storage but should not be the only application filesystem.
 - Boot-test a tiny process in QEMU and assert serial output, exit status, and fault containment.
+
+### Stage 1.4 — Bounded ARM64 Mach-O execution proof of concept (in this PR)
+
+A standalone, synthetic **Apple Silicon ARM64 Mach-O** with a genuine `MH_MAGIC_64`, `CPU_TYPE_ARM64`, `LC_SEGMENT_64` and `LC_MAIN` is loaded and interpreted on an **x86** Bordify kernel. The test-only interpreter supports only the ARM64 instructions `ADR`, `MOVZ`, and `SVC #0`; `SVC` uses a **custom Bordify test ABI**, not Darwin or iOS syscalls. It runs within an explicitly bounded 64-KiB guest byte array and a fixed 1,024-instruction budget. `APPS/ARMHELLO.MCH` prints a message and exits through the guest ABI; CI confirms its output while Bordify continues to the desktop.
+
+**This is NOT native Apple Silicon app compatibility.** Typical macOS ARM64 code depends on thousands of other instructions and full Darwin, dyld, Objective-C/Swift and Cocoa frameworks, signatures and OS services. It is a safe interpreter proof of concept that exercises real ARM64 instruction encoding.
 
 ### Stage 1.5 — Restricted real Win32 PE32 console execution (in this PR)
 
