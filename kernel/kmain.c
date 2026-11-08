@@ -100,6 +100,14 @@ void kernel_main(uint32_t mb_info_address) {
         }
     }
 
+    if (fat16_mounted()) {
+        int winio=process_run_win32_pe("APPS","WINIO.EXE");
+        if (winio==0)
+            kprintf("[win32-file] ring-3 Win32 CreateFile/WriteFile/ReadFile/CloseHandle roundtrip passed\n");
+        else
+            kprintf("[win32-file] persistent Win32 file API demo failed: %d\n",winio);
+    }
+
     compat_vm_demos();
 
     gui_init();
