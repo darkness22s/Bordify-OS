@@ -57,6 +57,7 @@ jobs:
           cat build/qemu-serial.log
           grep -F "[dmg] read-only raw UDIF sector verified in QEMU" build/qemu-serial.log
           grep -F "[dmg] zlib compressed UDIF sector verified in QEMU" build/qemu-serial.log
+          grep -F "[hfsplus] compressed DMG HFS+ volume header verified in QEMU" build/qemu-serial.log
           grep -F "BORDIFY ARM64: interpreted Mach-O demo under x86 QEMU" build/qemu-serial.log
           grep -F "[arm64] Mach-O interpreted safely; guest exited 0 after 7 steps" build/qemu-serial.log
           grep -F "[process] paging on" build/qemu-serial.log
