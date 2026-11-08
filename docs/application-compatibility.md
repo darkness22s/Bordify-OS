@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32/x86 PE32 demos; a restricted PE32+ x64 installer fixture; an experimental ARM64/Darwin/ObjC interpreter; and a read-only zlib UDIF/HFS+ mount with verified file extraction and FAT16 installation**. A generated HFS+ DMG can deliver an ARM64 Mach-O program which Bordify launches and persists to disk. **Arbitrary third-party DMGs, APFS, PKG/.app installation, general macOS compatibility and full Darwin/Cocoa are NOT supported.**
+Status: **native ELF32/x86 PE32 demos; a restricted PE32+ x64 installer fixture; a tested clang-compiled Apple ARM64 Mach-O execution subset and experimental Darwin/ObjC bridges; and a read-only zlib UDIF/HFS+ mount with verified file extraction and FAT16 installation**. A generated HFS+ DMG can deliver an ARM64 Mach-O program which Bordify launches and persists to disk. **Arbitrary third-party DMGs, APFS, PKG/.app installation, general macOS compatibility and full Darwin/Cocoa are NOT supported.**
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -11,11 +11,11 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 | --- | --- | --- |
 | Windows x64 EXE installers | 🟢 **Audited built-in installer fixture only:** real PE32+ AMD64 setup invokes `CreateFileA/WriteFile/CloseHandle`, writes a second PE32+ app onto FAT16, which Bordify reads and runs; GitHub Actions verifies persistence byte-for-byte | ⚠️ **General installer feature is still incomplete:** downloaded third-party x64 EXEs, NSIS/Inno/MSI setup, GUI, DLLs, broad Win32 APIs, arbitrary filesystem paths, production isolation, native 64-bit execution |
 | macOS DMG mounting and installation | 🟢 **Audited fixture only:** zlib UDIF read-only HFS+ mount, root catalog lookup, data-fork extraction, persistent FAT16 installation and ARM64 Mach-O execution pass QEMU | ⚠️ **General DMG installation remains incomplete:** unsupported codecs, APFS, general HFS+ B-trees/extents and partitions, `.app` bundles, PKG scripts, arbitrary third-party installers |
-| Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
+| Apple Silicon ARM64 execution | 🟢 **Compiled workload subset:** independent Clang-generated Apple ARM64 Mach-O C loop (70 guest instructions) and assembled arithmetic/stack/function-call program (55 instructions) run through x86 QEMU and exit successfully; invalid opcodes/branches/addresses rejected | ⚠️ **General ARM64/macOS applications not supported:** full A64/AArch64/NEON/SVE instruction coverage, multiple Mach-O segments, dyld, Objective-C/Swift dependencies, real Darwin application APIs, device/OS services |
 | Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
 | macOS Darwin/Cocoa runtime | 🟡 ARM64 Mach-O demo calls BSD `write/exit/getpid` subset and experimental ObjC `objc_getClass/objc_msgSend` shim for `NSString` and `NSApplication` methods | Real dyld/libobjc symbol linkage, broader libSystem/Objective-C/Swift, Foundation/AppKit GUI, and actual macOS app compatibility |
 
-**Acceptance policy:** A green check for a **particular test fixture** means only that fixture passes end-to-end installation and boot tests. The requested **general Windows x64 installer** capability is NOT green or production-ready until independent, real-world, legally redistributable x64 installers and their installed apps pass end-to-end tests in Bordify. A generated PE fixture cannot establish general third-party compatibility.
+**Acceptance policy:** Green for a specific audited or compiler-generated workload means **only that tested workload** is verified in CI, not general application compatibility. The x64 installer, HFS+ DMG and Apple ARM64 *specific test gates* now pass. General Windows/macOS application support is not production-ready until multiple independently produced real-world applications, dependencies and installers pass secure end-to-end tests.
 
 ## End-state goals
 
@@ -95,6 +95,19 @@ The Files app now has an Apps sidebar shortcut. Double-click `APPS/HELLO.ELF` to
 A standalone, synthetic **Apple Silicon ARM64 Mach-O** with a genuine `MH_MAGIC_64`, `CPU_TYPE_ARM64`, `LC_SEGMENT_64` and `LC_MAIN` is loaded and interpreted on an **x86** Bordify kernel. The test-only interpreter supports only the ARM64 instructions `ADR`, `MOVZ`, and `SVC #0`; `SVC` uses a **custom Bordify test ABI**, not Darwin or iOS syscalls. It runs within an explicitly bounded 64-KiB guest byte array and a fixed 1,024-instruction budget. `APPS/ARMHELLO.MCH` prints a message and exits through the guest ABI; CI confirms its output while Bordify continues to the desktop.
 
 **This is NOT native Apple Silicon app compatibility.** Typical macOS ARM64 code depends on thousands of other instructions and full Darwin, dyld, Objective-C/Swift and Cocoa frameworks, signatures and OS services. It is a safe interpreter proof of concept that exercises real ARM64 instruction encoding.
+
+### Stage 1.4b — Clang-compiled Apple ARM64 user-code execution (QEMU verified)
+
+The original 7-instruction custom-ABI demonstration has now been supplemented with **two independently assembled/compiled ARM64 Mach-O workloads**, using the Apple ARM64 target `clang -target arm64-apple-macos11` and a checked no-relocations Mach-O object wrapper, rather than hand-encoding test instructions:
+
+- `APPS/ARMWORK.MCH`: a real Apple ARM64 **assembly source** with conditional loops, add/sub with N/Z/C/V flags, ARM64 B.cond, BL/RET, stack-frame setup, pair stores, and bounded 64-bit LDR/STR. Under x86 QEMU its guest executes **55 instructions** and emits a serial message through the opt-in Darwin BSD `write` syscall.
+- `APPS/ARMCALC.MCH`: **real C source** compiled with Clang `-O1 -ffreestanding` for Apple ARM64. It computes a volatile checksum on the emulated stack. Real compiler-generated MOV W/X, ADD/SUB, CMP, B.cond and CSEL instructions execute. Under x86 QEMU it executes **70 guest instructions** and exits 0 through the test Darwin BSD exit API; a host test changes the comparison and verifies exit 99 instead.
+
+The interpreter now supports ARMv8-A register arithmetic (immediate and LSL register forms), MOVN/Z/K, conditional select, B/BL, B.cond, CBZ/CBNZ, RET, unsigned-offset 32/64-bit LDR/STR and limited STP/LDP stack operations. It tracks 64-bit registers, a separate guest stack pointer and NZCV condition flags; memory operations remain within a bounded 64 KiB guest, while guest writes into the loaded image are rejected. All execution is **instruction-by-instruction interpretation** on the existing 32-bit x86 kernel: it is NOT an ARM64 native kernel or Rosetta/Apple Silicon virtualization.
+
+Host tests cover successful compiler-generated behavior, deliberate incorrect comparisons, infinite instruction loops, unsupported opcodes, out-of-range guest addresses and unsupported CPU formats. The successful QEMU run verifies both independent workloads and desktop startup: https://github.com/darkness22s/Bordify-OS/actions/runs/42509399305.
+
+**Scope of the green test:** *Apple Silicon ARM64 Mach-O execution for these small, self-contained programs only.* Unknown/third-party apps are NOT generally runnable: full ARM64 ISA incl. SIMD/NEON and atomics, larger/multi-segment Mach-O loading, dynamic linking, framework dependencies, multiprocessing, complete Darwin syscall and Cocoa environments, hardened process sandboxing and a broad compatibility suite are not implemented. Do not advertise unrestricted Apple Silicon macOS application compatibility.
 
 ### Stage 1.5 — Restricted real Win32 PE32 console execution (in this PR)
 
