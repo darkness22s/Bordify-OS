@@ -38,6 +38,9 @@ int main(void) {
                                 save_app,NULL,&report));
     assert(report.finished && report.exit_code==0);
     assert(report.imports==4 && report.installed_bytes==0x800);
+    assert(memory[0x13c0]==0x00 && memory[0x13c1]==0x08 &&
+           memory[0x13c2]==0 && memory[0x13c3]==0);
+    /* 2048 bytes returned through Win64 lpNumberOfBytesWritten. */
     assert(installed_size==0x800 && !memcmp(installed,"MZ",2));
 
     /* Output of the actual installed x64 program, not the setup loader. */
