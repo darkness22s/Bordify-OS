@@ -671,6 +671,12 @@ static void web_fetch_http(web_state_t *ws, const char *url) {
     kstrncpy(current, url, sizeof(current) - 1);
     current[sizeof(current) - 1] = 0;
     for (int redirect = 0; redirect < 5; redirect++) {
+        if (web_scheme(current, "https://")) {
+            set_error_page(ws, "TLS is not available",
+                           "That page redirected to HTTPS, which this build cannot load. "
+                           "Try another plain HTTP address.");
+            return;
+        }
         char host[192];
         uint16_t port;
         char path[WEB_URL_SIZE];
@@ -928,6 +934,11 @@ static void web_key(gui_window_t *window, const key_event_t *event) {
         } else if (event->code == KEY_ESC) {
             web.editing = false;
         }
+        return;
+    }
+    if (event->code == KEY_TAB || event->ch == '/') {
+        web.editing = true;
+        web.edit[0] = 0;
         return;
     }
     if (event->code == KEY_DOWN) {
