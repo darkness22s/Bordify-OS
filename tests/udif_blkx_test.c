@@ -89,7 +89,7 @@ int main(void) {
     char xml[2048];
     int wrote = snprintf(xml, sizeof(xml),
         "<plist><dict><key>resource-fork</key><dict>"
-        "<key>blkx</key><array><dict><key>Data</key><data>\\n%s\\n</data>"
+        "<key>blkx</key><array><dict><key>Data</key><data>\n%s\n</data>"
         "</dict></array></dict></dict></plist>", encoded);
     assert(wrote > 0 && (size_t)wrote < sizeof(xml));
     assert(udif_blkx_from_xml(xml, (size_t)wrote, 64, 4096, &map));
