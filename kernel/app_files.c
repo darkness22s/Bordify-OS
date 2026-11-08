@@ -13,6 +13,7 @@
 #include "udif_blkx.h"
 #include "hfsplus_probe.h"
 #include "a64_demo.h"
+#include "compat_demos.h"
 #include "process.h"
 
 #define FILES_MAX_ENTRIES 128
@@ -328,6 +329,22 @@ static void files_open_selected(void) {
         int code = a64_demo_run();
         set_status(code == 0 ? "ARM64 Mach-O demo interpreted successfully" :
                                "ARM64 demo failed; inspect serial log");
+        return;
+    }
+    /* Only audited 64-bit and Darwin demos are interpreted; arbitrary
+     * installers and foreign programs remain inspection-only. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "WIN64.EXE") == 0) {
+        int code = compat_win64_demo_run();
+        set_status(code == 0 ? "x64 PE32+ interpreted successfully" :
+                               "x64 demo failed; inspect serial log");
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "DARWIN.MCH") == 0) {
+        int code = compat_darwin_demo_run();
+        set_status(code == 0 ? "Darwin ARM64 bridge demo succeeded" :
+                               "Darwin demo failed; inspect serial log");
         return;
     }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
