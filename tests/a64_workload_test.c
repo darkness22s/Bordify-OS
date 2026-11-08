@@ -52,13 +52,14 @@ int main(void) {
 
     /* Malformed guest pair-stack operation with an extreme unsigned base
      * must fail safely without signed conversion overflow. */
-    memcpy(original,file+0x100,4);
+    uint8_t first_saved[4], second_saved[4];
+    memcpy(first_saved,file+0x100,4);
+    memcpy(second_saved,file+0x104,4);
     set32(file+0x100,0x92800000u); /* MOVN X0,#0 -> UINT64_MAX */
-    memcpy(file+0x104,4);
-    set32(file+0x104,0xa9807c01u); /* STP X1,XZR,[X0,#-16]! */
+    set32(file+0x104,0xa9bf7c01u); /* STP X1,XZR,[X0,#-16]! */
     assert(!a64_macho_run_darwin(file,n,guest,sizeof(guest),on_output,NULL,&r));
-    memcpy(file+0x100,original,4);
-    /* The next instruction is restored from the compiler fixture below. */
+    memcpy(file+0x100,first_saved,4);
+    memcpy(file+0x104,second_saved,4);
     /* Reject unsupported instruction in the function prologue. */
     memcpy(original,file+0x100,4);
     set32(file+0x100,0xffffffffu);
