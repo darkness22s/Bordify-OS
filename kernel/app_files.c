@@ -8,6 +8,7 @@
 #include "pit.h"
 #include "string.h"
 #include "printf.h"
+#include "exec_inspect.h"
 
 #define FILES_MAX_ENTRIES 128
 #define FILES_VIEWER_SIZE 14336
@@ -209,6 +210,28 @@ static void files_open_selected(void) {
         return;
     }
     fs.viewer_text[bytes] = 0;
+    /*
+     * Inspect before treating a binary payload as a NUL-terminated string.
+     * Foreign executables are deliberately NOT run as kernel code.
+     * With FAT16 8.3 filenames, bundle directories are not supported yet.
+     */
+    exec_info_t executable;
+    if (exec_inspect(fs.viewer_text, (size_t)bytes, &executable)) {
+        snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                 "Executable file: %s\\n"
+                 "Format: %s\\n"
+                 "CPU: %s\\n"
+                 "Header: %s\\n"
+                 "File size: %u bytes\\n\\n"
+                 "%s\\n\\n"
+                 "Bordify does not execute foreign binaries yet.\\n"
+                 "This is a safe file-format inspection, not an app launcher.",
+                 entry->display,
+                 exec_format_name(executable.format),
+                 exec_arch_name(executable.arch),
+                 executable.valid ? "Recognized" : "Invalid or truncated",
+                 entry->size, exec_compatibility_note(&executable));
+    }
     kstrncpy(fs.viewer_name, entry->name, sizeof(fs.viewer_name) - 1);
     fs.viewer_name[sizeof(fs.viewer_name) - 1] = 0;
     fs.viewer_scroll = 0;
