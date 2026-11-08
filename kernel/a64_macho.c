@@ -185,9 +185,7 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
         }
 
         /* ARMv8 move-wide 32/64 bit: MOVZ, MOVN, MOVK. */
-        if ((instruction & 0x1f800000u)==0x12800000u ||
-            (instruction & 0x1f800000u)==0x52800000u ||
-            (instruction & 0x1f800000u)==0x72800000u) {
+        if ((instruction & 0x1f800000u)==0x12800000u) {
             unsigned op=(instruction>>29)&3u;
             bool sf=(instruction>>31)!=0;
             unsigned shift=(instruction>>21)&3u;
