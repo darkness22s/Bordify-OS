@@ -8,15 +8,16 @@
 static uint8_t memory[256*1024];
 static uint8_t persisted[1024];
 static size_t persisted_count;
+static bool persisted_exists;
 static bool refuse_save;
 static bool save(const uint8_t *buf,size_t n,void *ctx) {
     (void)ctx;
     if (refuse_save || n>sizeof(persisted)) return false;
-    memcpy(persisted,buf,n);persisted_count=n;return true;
+    memcpy(persisted,buf,n);persisted_count=n;persisted_exists=true;return true;
 }
 static int load(uint8_t *buf,size_t cap,void *ctx) {
     (void)ctx;
-    if (!persisted_count || cap<persisted_count) return -1;
+    if (!persisted_exists || cap<persisted_count) return -1;
     memcpy(buf,persisted,persisted_count);return (int)persisted_count;
 }
 static uint32_t rd32(const uint8_t *p) {
@@ -99,6 +100,19 @@ int main(void) {
     assert(!win32_pe_stage(pe,file_size,memory,sizeof(memory),&image));
     pe[0x200+(0x12b0-0x1000)+2]='C';
     assert(!win32_pe_stage(pe,100,memory,sizeof(memory),&image));
+    /* CREATE_ALWAYS followed by immediate CloseHandle must persist a
+     * zero-byte file and allow OPEN_EXISTING to read EOF successfully. */
+    win32_files_reset(&fs);
+    assert(win32_files_open(&fs,memory,WIN32_PE_USER_BASE,sizeof(memory),
+                            PATH,WIN32_FILE_GENERIC_WRITE,2,load,NULL)==WIN32_FILE_HANDLE);
+    assert(win32_files_close(&fs,WIN32_FILE_HANDLE,save,NULL));
+    assert(persisted_exists && persisted_count==0);
+    win32_files_reset(&fs);
+    assert(win32_files_open(&fs,memory,WIN32_PE_USER_BASE,sizeof(memory),
+                            PATH,WIN32_FILE_GENERIC_READ,3,load,NULL)==WIN32_FILE_HANDLE);
+    assert(win32_files_read(&fs,WIN32_FILE_HANDLE,memory,WIN32_PE_USER_BASE,
+                            sizeof(memory),DST,16)==0);
+    assert(win32_files_close(&fs,WIN32_FILE_HANDLE,save,NULL));
     puts("Win32 kernel32 ring-3 file I/O and PE32 loader tests: PASS");
     return 0;
 }
