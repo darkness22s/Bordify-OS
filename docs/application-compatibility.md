@@ -1,8 +1,21 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32 + a restricted Win32 PE32 console runtime demonstrated in QEMU**. Windows x64 installers, macOS DMG installation, general Apple Silicon and Darwin/Cocoa applications are **NOT** supported.
+Status: **native ELF32, restricted Windows PE32 console execution, read-only uncompressed UDIF disk-sector access, and a tiny ARM64 Mach-O interpreter all verified in QEMU**. Full Windows x64 installers, DMG mount/install, Apple Silicon macOS apps and Darwin/Cocoa applications are **NOT** supported.
 
-Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is no user-process model, virtual address-space isolation, syscall ABI, dynamic linker, 64-bit CPU mode, or general-purpose executable loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
+Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
+
+
+## Requested five-feature acceptance status (do not relabel without real app tests)
+
+| Requested feature | Verified now | Not yet working |
+| --- | --- | --- |
+| Windows x64 EXE installers | Windows **x86 PE32** demo calls three kernel32 functions | PE32+ x64 CPU execution, 64-bit DLLs, registry, installation APIs and real setup engines |
+| macOS DMG mounting and installation | DMG footer + first XML blkx table, raw/zero sector reads from disk | Compressed images, whole-image filesystem mount, APFS/HFS+, PKG/.app installation |
+| Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
+| Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
+| macOS Darwin/Cocoa runtime | Mach-O metadata recognition and synthetic ARM64 instruction demo | dyld, libSystem, Objective-C/Swift, Foundation, Cocoa/AppKit and macOS services |
+
+**Release policy:** Only mark an item green after a real, licensed sample installer and installed application have passed automated end-to-end tests. A synthetic fixture is a lower-level milestone.
 
 ## End-state goals
 
@@ -25,9 +38,9 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 
 Notes: executable/container prefix inspection examines only the bytes File Manager reads (currently at most about 14 KiB), while DMG metadata reads the last 512 bytes of the file. It is **not** a complete image verifier or loader. The FAT16 filesystem cannot currently store a regular macOS `.app` bundle with long paths and POSIX metadata. Some signatures and architectures are recognized heuristically; execution requires full format/segment/import validation.
 
-### Stage 0.5 — Installer container support (not yet implemented)
+### Stage 0.5 — Installer container support (partial read-only UDIF sector access)
 
-- **DMG:** Fully implement UDIF `blkx` chunk maps, support needed compression algorithms, validate checksums and create a read-only block-device abstraction. Add HFS+ and APFS readers. A DMG is a virtual disk image, not itself a macOS executable or automatic installer.
+- **DMG:** The experimental UDIF reader now decodes the first XML `blkx`/base64 `mish` block map, validates raw and zero-fill chunk bounds, reads actual 512-byte sectors from a FAT16-hosted DMG **without extracting the whole image**, and explicitly refuses compressed blocks. QEMU verifies `APPS/DMGDEMO.DMG` end-to-end. **Still required:** multiple partitions/maps, zlib/LZFSE/bzip2 and other codecs, checksum validation, block-device abstraction, and HFS+/APFS filesystem mounting, plus installer workflows. A DMG is a virtual disk image, not necessarily an installer.
 - **macOS PKG:** Implement a sandboxed XAR reader, compression and package manifest parsing. Installation scripts and dependency management must be handled explicitly, with clear trust/permission policy.
 - **macOS APP:** Support long filenames, symlinks, bundle `Info.plist`, architecture selection and code-signature validation policy before passing executable to an isolated Mach-O process runtime.
 - **Windows x64 EXE installer:** Beyond PE32+ recognition, needs long-mode/64-bit processes, 64-bit Windows APIs, dynamic DLL loading, registry semantics, installer file/shortcut operations and a target app runtime. Self-extractors such as NSIS/Inno/InstallShield are different formats layered atop PE; compatibility must be tested individually.
@@ -43,11 +56,11 @@ The Files app now has an Apps sidebar shortcut. Double-click `APPS/HELLO.ELF` to
 **Remaining work:**
 
 
-- Design private per-process virtual address spaces, page-table management, user-mode (ring 3), guarded stacks and kernel/user memory boundaries.
-- Add a syscall entry mechanism, file handles, bounded copies from userspace, fault isolation, an exit/reap mechanism, and preemptive/cooperative scheduling as chosen.
-- Build an **ELF32 native Bordify ABI** first and run a minimal hello-world user program as a smoke test. Keep drivers and GUI in trusted components.
-- Add a VFS that preserves long filenames and file metadata. FAT16 may remain boot storage but should not be the only application filesystem.
-- Boot-test a tiny process in QEMU and assert serial output, exit status, and fault containment.
+- Replace the shared, single-user mapping with private per-process address spaces, page-table management, guarded stacks and tighter kernel/user mappings.
+- Add process scheduling, syscall validation, independent file handles and resource lifecycle, with capability-scoped system services.
+- Extend the current ELF32 hello-world ABI to support more than serial output and exit.
+- Add a VFS preserving long filenames, file permissions and metadata; FAT16 can remain boot storage.
+- Expand QEMU tests to exercise concurrent processes, privilege boundaries, malformed ELF and resource exhaustion.
 
 ### Stage 1.4 — Bounded ARM64 Mach-O execution proof of concept (in this PR)
 
