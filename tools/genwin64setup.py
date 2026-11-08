@@ -30,15 +30,15 @@ def main(output, payload):
         b[i]=0
     d(raw(0x1200),0x1260)   # import lookup table
     d(raw(0x1200)+12,0x1240) # DLL name
-    d(raw(0x1200)+16,0x1280) # IAT
+    d(raw(0x1200)+16,0x1290) # IAT; lookup table needs fifth NULL slot
     b[raw(0x1240):raw(0x1240)+13]=b"kernel32.dll\0"
-    imports=((0x12A0,b"CreateFileA\0"),
-             (0x12B8,b"WriteFile\0"),
-             (0x12D0,b"CloseHandle\0"),
-             (0x12E8,b"ExitProcess\0"))
+    imports=((0x12C0,b"CreateFileA\0"),
+             (0x12D8,b"WriteFile\0"),
+             (0x12F0,b"CloseHandle\0"),
+             (0x1308,b"ExitProcess\0"))
     for i,(rva,name) in enumerate(imports):
         q(raw(0x1260)+i*8,rva)
-        q(raw(0x1280)+i*8,rva)
+        q(raw(0x1290)+i*8,rva)
         b[raw(rva)+2:raw(rva)+2+len(name)]=name
     path=b"C:\\APP64.EXE\0"
     b[raw(0x1350):raw(0x1350)+len(path)]=path
@@ -66,18 +66,18 @@ def main(output, payload):
     mov_stack(0x20,2)           # CREATE_ALWAYS
     mov_stack(0x28,0x80)        # FILE_ATTRIBUTE_NORMAL
     mov_stack(0x30,0)           # template=null
-    call(0x1280)                # CreateFileA
+    call(0x1290)                # CreateFileA
     add(b"\x48\x89\xc3")       # rbx=rax (save file handle)
     add(b"\x48\x89\xc1")       # rcx=rax (file handle)
     lea(0x15,0x1400)            # rdx -> embedded PE32+ program
     mov_r8(len(app))
     add(b"\x45\x31\xc9")       # lpNumberOfBytesWritten=NULL
     mov_stack(0x20,0)           # lpOverlapped=NULL
-    call(0x1288)                # WriteFile
+    call(0x1298)                # WriteFile
     add(b"\x48\x89\xd9")       # rcx=rbx
-    call(0x1290)                # CloseHandle -> commit
+    call(0x12A0)                # CloseHandle -> commit
     mov_rcx(0)
-    call(0x1298)                # ExitProcess(0)
+    call(0x12A8)                # ExitProcess(0)
     add(b"\x0f\x0b")            # reject accidental fallthrough
     if len(code)>=0x1E0:
         raise ValueError("test VM code too long for fixed fixture layout")
