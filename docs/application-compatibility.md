@@ -202,3 +202,7 @@ A generated **real Mach-O ARM64** test binary `APPS/DARWIN.MCH` calls the bridge
 3. Double-clicking a known PE/Mach-O file in Files shows a truthful format/architecture/unsupported notice, without crashing.
 4. A deliberately truncated binary or invalid DMG metadata is reported as invalid/incomplete.
 5. QEMU serial confirms ring-3 ELF32 sample execution, isolated supervisor-memory page fault and successful return to the desktop. Further execution must build on this native process ABI; no direct PE or Mach-O kernel execution.
+
+### HFS+ fail-closed catalog and extraction hardening (2026-11-08)
+
+The restricted root-directory HFS+ reader rejects depth-one leaf nodes with sibling links, since following sibling chains is not implemented. It also rejects file forks whose total allocation-block count differs from the first extent, rather than silently treating a fragmented file as fully extracted. If a later sector read fails during extraction, previously copied output bytes are cleared before returning failure; callers must still honor the boolean result and must not publish data on failure. Host regression tests exercise both sibling-link directions and the fragmented-fork rejection. This does **not** implement general HFS+ B-tree traversal, overflow extents, APFS or third-party DMG installation.
