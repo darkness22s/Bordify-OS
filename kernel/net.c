@@ -599,11 +599,14 @@ static bool net_dns_resolve(const char *host, uint32_t *ip_out) {
     write_be16(query + 4, 1);
     int len = 12;
     size_t host_len = kstrlen(host);
+    if (host_len && host[host_len - 1] == '.') {
+        host_len--;
+    }
     if (host_len == 0 || host_len > 253) {
         net_set_error("Invalid DNS host name");
         return false;
     }
-    for (size_t i = 0; i <= host_len;) {
+    for (size_t i = 0; i < host_len;) {
         size_t label = 0;
         while (i + label < host_len && host[i + label] != '.') {
             label++;
@@ -676,6 +679,9 @@ got_answer:
         }
         if (type == 1 && klass == 1 && rdlength == 4) {
             *ip_out = read_be32(dns_rx + offset);
+            kprintf("[net] DNS %s -> %u.%u.%u.%u\n", host,
+                    (*ip_out >> 24) & 0xFF, (*ip_out >> 16) & 0xFF,
+                    (*ip_out >> 8) & 0xFF, *ip_out & 0xFF);
             return true;
         }
         offset += rdlength;
@@ -769,6 +775,9 @@ static bool tcp_connect(uint32_t remote_ip, uint16_t remote_port) {
             }
         }
         if (tcp.established) {
+            kprintf("[net] TCP connected to %u.%u.%u.%u:%u\n",
+                    (remote_ip >> 24) & 0xFF, (remote_ip >> 16) & 0xFF,
+                    (remote_ip >> 8) & 0xFF, remote_ip & 0xFF, remote_port);
             return true;
         }
         if (tcp.reset) {
@@ -1196,6 +1205,12 @@ int net_http_get(const char *host, uint16_t port, const char *path,
         return -1;
     }
     tcp_rx[tcp_rx_len] = 0;
-    return http_extract((const char *)tcp_rx, tcp_rx_len, out, max_out,
-                        location, location_size, status_out);
+    int status = 0;
+    int result = http_extract((const char *)tcp_rx, tcp_rx_len, out, max_out,
+                              location, location_size, &status);
+    kprintf("[net] HTTP %d, %d response bytes\n", status, tcp_rx_len);
+    if (status_out) {
+        *status_out = status;
+    }
+    return result;
 }
