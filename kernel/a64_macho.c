@@ -243,6 +243,23 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
             else if (!setflags && alu_immediate) stack_pointer=value;
             pc+=4; continue;
         }
+        /* CSEL Wd/Xd,Wn/Xn,Wm/Xm,cond: compiler-generated if/else.
+         * All register operands stay inside the guest register bank. */
+        if ((instruction & 0x7fe00c00u)==0x1a800000u) {
+            bool take=false;
+            if (!a64_condition((instruction>>12)&15u,
+                               flag_n,flag_z,flag_c,flag_v,&take))
+                return false;
+            unsigned rd=instruction&31u;
+            unsigned rn=(instruction>>5)&31u;
+            unsigned rm=(instruction>>16)&31u;
+            uint64_t first=rn==31u ? 0 : registers[rn];
+            uint64_t second=rm==31u ? 0 : registers[rm];
+            uint64_t v=take ? first : second;
+            if (!(instruction & 0x80000000u)) v=(uint32_t)v;
+            if (rd!=31u) registers[rd]=v;
+            pc+=4; continue;
+        }
         /* B and BL, signed PC-relative offsets measured in instructions. */
         if ((instruction & 0x7c000000u)==0x14000000u) {
             int32_t delta=a64_sign_extend(instruction&0x03ffffffu,26);
