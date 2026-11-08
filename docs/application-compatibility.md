@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native x86 ELF32 ring-3 execution demonstrated with QEMU; executable + installer-container inspection implemented; Windows and macOS installation/launch are NOT implemented**.
+Status: **native ELF32 + a restricted Win32 PE32 console runtime demonstrated in QEMU**. Windows x64 installers, macOS DMG installation, Apple Silicon and Darwin/Cocoa applications are **NOT** supported.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is no user-process model, virtual address-space isolation, syscall ABI, dynamic linker, 64-bit CPU mode, or general-purpose executable loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -48,6 +48,10 @@ The Files app now has an Apps sidebar shortcut. Double-click `APPS/HELLO.ELF` to
 - Build an **ELF32 native Bordify ABI** first and run a minimal hello-world user program as a smoke test. Keep drivers and GUI in trusted components.
 - Add a VFS that preserves long filenames and file metadata. FAT16 may remain boot storage but should not be the only application filesystem.
 - Boot-test a tiny process in QEMU and assert serial output, exit status, and fault containment.
+
+### Stage 1.5 — Restricted real Win32 PE32 console execution (in this PR)
+
+Implemented a bounded PE32 loader for a single x86 executable at the fixed user base `0x40000000`, with checked sections, import names and a four-function `kernel32.dll` bridge implemented as ring-3 stdcall trampolines: `ExitProcess`, `GetStdHandle`, `WriteFile`, and `GetLastError`. The independently generated `APPS/WINHELLO.EXE` is a real PE32 executable with a proper import table; it calls `GetStdHandle`, `WriteFile`, and `ExitProcess`. The VM boot test requires its console output and exit status, and it can be launched from the Files Apps sidebar. Unsupported machine types, invalid headers, unknown imports, relocation-dependent images and non-console executables are deliberately refused. This is **not** general Windows compatibility; it supports an intentionally tiny console-only API subset and must not be used to run untrusted installers. No x64 / PE32+ execution is implemented.
 
 ### Stage 2 — Target Windows x86 applications
 
