@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **design + executable-format inspection implemented; binary execution not implemented**.
+Status: **executable + installer-container inspection implemented; installing and launching foreign apps not implemented**.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is no user-process model, virtual address-space isolation, syscall ABI, dynamic linker, 64-bit CPU mode, or general-purpose executable loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -20,8 +20,19 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 2. Show format, architecture, and diagnostics when opening files in Files. Do not cast foreign executable bytes to function pointers.
 3. Add host-side test fixtures and run them in CI on pull requests.
 4. Explicitly report incompatible/malformed files rather than claiming they can run.
+5. Inspect Apple DMG UDIF trailing `koly` metadata using a 512-byte random-access FAT16 read (rather than allocating the image); identify Apple XAR `.pkg` packages and OLE containers that **might** be Windows MSI files.
+6. Confirm x86-64 Windows PE32+ and ARM64 Apple Mach-O recognition with synthetic test fixtures.
 
-Notes: the inspector examines only the bytes File Manager reads (currently at most about 14 KiB). It is **not** a complete image verifier or loader. The FAT16 filesystem cannot currently store a regular macOS `.app` bundle with long paths and POSIX metadata. Some signatures and architectures are recognized heuristically; execution requires full format/segment/import validation.
+Notes: executable/container prefix inspection examines only the bytes File Manager reads (currently at most about 14 KiB), while DMG metadata reads the last 512 bytes of the file. It is **not** a complete image verifier or loader. The FAT16 filesystem cannot currently store a regular macOS `.app` bundle with long paths and POSIX metadata. Some signatures and architectures are recognized heuristically; execution requires full format/segment/import validation.
+
+### Stage 0.5 — Installer container support (not yet implemented)
+
+- **DMG:** Fully implement UDIF `blkx` chunk maps, support needed compression algorithms, validate checksums and create a read-only block-device abstraction. Add HFS+ and APFS readers. A DMG is a virtual disk image, not itself a macOS executable or automatic installer.
+- **macOS PKG:** Implement a sandboxed XAR reader, compression and package manifest parsing. Installation scripts and dependency management must be handled explicitly, with clear trust/permission policy.
+- **macOS APP:** Support long filenames, symlinks, bundle `Info.plist`, architecture selection and code-signature validation policy before passing executable to an isolated Mach-O process runtime.
+- **Windows x64 EXE installer:** Beyond PE32+ recognition, needs long-mode/64-bit processes, 64-bit Windows APIs, dynamic DLL loading, registry semantics, installer file/shortcut operations and a target app runtime. Self-extractors such as NSIS/Inno/InstallShield are different formats layered atop PE; compatibility must be tested individually.
+- **MSI:** OLE/CFB signature alone is not proof of a Windows Installer database; use the MSI directory/stream structures to validate and install under a Windows Installer-compatible runtime.
+- **Hardware:** Plan a x86-64 kernel and 64-bit boot path while keeping the current 32-bit boot image working until a tested replacement exists.
 
 ### Stage 1 — Native process infrastructure (required before foreign apps)
 
@@ -65,5 +76,5 @@ Notes: the inspector examines only the bytes File Manager reads (currently at mo
 1. Bordify compiles with `kernel/exec_inspect.c` included in the kernel.
 2. Host tests pass via `make test` in GitHub Actions.
 3. Double-clicking a known PE/Mach-O file in Files shows a truthful format/architecture/unsupported notice, without crashing.
-4. A deliberately truncated binary is reported as invalid/incomplete.
+4. A deliberately truncated binary or invalid DMG metadata is reported as invalid/incomplete.
 5. Subsequent work starts with a protected user-process proof of concept, not direct execution of PE or Mach-O in kernel mode.
