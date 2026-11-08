@@ -404,6 +404,13 @@ static void files_open_selected(void) {
                                "Compiled C ARM64 app failed; inspect serial");
         return;
     }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "COCOA.MCH") == 0) {
+        int code=compat_cocoa_lifecycle_run();
+        set_status(code == 0 ? "ObjC/AppKit lifecycle demo passed" :
+                               "ObjC/AppKit demo failed; inspect serial");
+        return;
+    }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
     if (bytes < 0) {
         set_status("Could not read file");
