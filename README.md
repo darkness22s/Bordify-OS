@@ -48,10 +48,10 @@ access using synthetic disk images (`APPS/DMGDEMO.DMG`, `APPS/ZDMG.DMG`).
 These demonstrations are checked by
 QEMU CI. The ARM64 guest demo uses a **custom test ABI**, not Darwin.
 
-The development branch also probes **HFS+/HFSX volume headers** inside
+The development branch also probes **HFS+/HFSX volume and catalog B-tree headers** inside
 compressed DMGs, including catalog-extent metadata, without mounting
 or reading an actual HFS+ filesystem. `APPS/HFSPLUS.DMG` is a synthetic
-header fixture, not a usable macOS installation image.
+header fixture (including a synthetic B-tree header), not a usable macOS installation image.
 
 This **does not** run Windows x64 installers or arbitrary .exe files,
 mount or install real macOS DMGs, run real Apple Silicon apps, or supply
