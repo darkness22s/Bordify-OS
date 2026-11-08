@@ -18,14 +18,21 @@ LDFLAGS := -m32 -no-pie -nostdlib -Wl,--build-id=none -T boot/linker.ld
 BUILD := build
 KERNEL := $(BUILD)/bordify.elf
 CFILES := $(wildcard kernel/*.c)
-AFILES := boot/boot.S kernel/isr.S
+AFILES := boot/boot.S kernel/isr.S kernel/user_entry.S
 BEARSSL_SRCS := $(wildcard third_party/bearssl/src/*.c third_party/bearssl/src/*/*.c)
 BEARSSL_OFILES := $(patsubst third_party/bearssl/src/%.c,$(BUILD)/bearssl/%.o,$(BEARSSL_SRCS))
 OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL)
+all: $(KERNEL) $(BUILD)/apps/hello.elf
+
+$(BUILD)/apps/hello.o: apps/hello.S
+	@mkdir -p $(BUILD)/apps
+	$(CC) -m32 -c $< -o $@
+
+$(BUILD)/apps/hello.elf: $(BUILD)/apps/hello.o
+	ld -m elf_i386 -nostdlib --build-id=none -Ttext=0x40001000 -e _start $< -o $@
 
 $(BUILD)/font.c: tools/genfont.py
 	@mkdir -p $(BUILD)
