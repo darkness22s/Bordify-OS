@@ -94,11 +94,22 @@ static bool probe_hfsplus_volume(void) {
                               file_read, &file, header) != UDIF_IO_OK)
         return false;
     hfsplus_volume_info_t info;
-    return hfsplus_probe_header(header, sizeof(header),
-                                map.sector_count, &info) &&
-           !info.case_sensitive && info.journaled &&
-           info.block_size == 4096 && info.total_blocks == 8 &&
-           info.catalog_first_block == 2;
+    if (!hfsplus_probe_header(header, sizeof(header),
+                              map.sector_count, &info) ||
+        info.case_sensitive || !info.journaled ||
+        info.block_size != 4096 || info.total_blocks != 8 ||
+        info.catalog_first_block != 2) return false;
+    uint64_t catalog_sector;
+    if (!hfsplus_catalog_first_sector(&info, map.sector_count,
+                                       &catalog_sector) ||
+        udif_blkx_read_sector(&map, map.sector_start + catalog_sector,
+                              file_read, &file, header) != UDIF_IO_OK)
+        return false;
+    hfsplus_catalog_info_t catalog;
+    return hfsplus_catalog_probe(header, sizeof(header),
+                                  info.catalog_logical_size, &catalog) &&
+           catalog.root_node == 1 && catalog.node_size == 512 &&
+           catalog.total_nodes == 16;
 }
 
 void udif_demo_probe(void) {
@@ -113,7 +124,7 @@ void udif_demo_probe(void) {
     else
         kprintf("[dmg] zlib sector probe failed\n");
     if (probe_hfsplus_volume())
-        kprintf("[hfsplus] compressed DMG HFS+ volume header verified in QEMU\n");
+        kprintf("[hfsplus] compressed DMG HFS+ volume and catalog header verified in QEMU\n");
     else
         kprintf("[hfsplus] compressed DMG header probe failed\n");
 }
