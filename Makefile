@@ -25,7 +25,14 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf
+
+$(BUILD)/apps/fault.o: apps/fault.S
+	@mkdir -p $(BUILD)/apps
+	$(CC) -m32 -c $< -o $@
+
+$(BUILD)/apps/fault.elf: $(BUILD)/apps/fault.o
+	ld -m elf_i386 -nostdlib --build-id=none -Ttext=0x40001000 -e _start $< -o $@
 
 $(BUILD)/apps/hello.o: apps/hello.S
 	@mkdir -p $(BUILD)/apps
