@@ -12,6 +12,7 @@
  */
 void process_init(void);
 int process_run_elf32(const char *directory, const char *filename);
+int process_run_win32_pe(const char *directory, const char *filename);
 
 /* Called from interrupt_dispatch for user exceptions and int 0x80. */
 void process_handle_interrupt(uint32_t *frame);
