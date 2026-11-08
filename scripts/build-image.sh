@@ -15,6 +15,7 @@ HFSPLUS="$ROOT/build/apps/hfsplus.dmg"
 MOUNTDMG="$ROOT/build/apps/mount.dmg"
 ARM="$ROOT/build/apps/armhello.mch"
 ARMWORK="$ROOT/build/apps/armwork.mch"
+ARMCALC="$ROOT/build/apps/armcalc.mch"
 DIST="$ROOT/dist"
 IMG="$DIST/Bordify-OS.img"
 VHD="$DIST/Bordify-OS.vhd"
@@ -22,7 +23,7 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$WIN64" ] || [ ! -f "$WINSETUP" ] || [ ! -f "$DARWIN" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$HFSPLUS" ] || [ ! -f "$MOUNTDMG" ] || [ ! -f "$ARM" ] || [ ! -f "$ARMWORK" ]; then
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$WIN64" ] || [ ! -f "$WINSETUP" ] || [ ! -f "$DARWIN" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$HFSPLUS" ] || [ ! -f "$MOUNTDMG" ] || [ ! -f "$ARM" ] || [ ! -f "$ARMWORK" ] || [ ! -f "$ARMCALC" ]; then
     echo "Missing kernel or demo executables; run make first." >&2
     exit 1
 fi
@@ -89,6 +90,7 @@ MOUNTED=1
 "${SUDO[@]}" cp "$MOUNTDMG" "$MNT/APPS/MOUNT.DMG"
 "${SUDO[@]}" cp "$ARM" "$MNT/APPS/ARMHELLO.MCH"
 "${SUDO[@]}" cp "$ARMWORK" "$MNT/APPS/ARMWORK.MCH"
+"${SUDO[@]}" cp "$ARMCALC" "$MNT/APPS/ARMCALC.MCH"
 "${SUDO[@]}" cp -r --no-preserve=mode,ownership,timestamps "$ROOT/assets/fs/." "$MNT/"
 
 "${SUDO[@]}" grub-install \
