@@ -75,6 +75,21 @@ third-party apps). The installer is a generated regression fixture,
 not an external Windows application, and is restricted to one output
 filename. The kernel cannot safely run untrusted installers yet.
 
+**Read-only compressed macOS DMG extraction and a constrained installer test:**
+`APPS/MOUNT.DMG` is a generated zlib-compressed UDIF image with a
+minimal HFS+ catalog containing an ARM64 Mach-O file, `DARWIN.MCH`.
+Opening this specific fixture in Files uses the new bounded HFS+
+read-only mount, catalog-record search and data-fork reader, extracts
+the file to `APPS/DMGAPP.MCH` on FAT16, and runs the installed
+program through the experimental ARM64 Darwin interpreter. CI extracts
+the saved file from QEMU's disk and compares it byte-for-byte against
+the bundled Mach-O; malformed HFS+ records and file extents are rejected.
+
+**Only this built-in HFS+ DMG file-extraction workflow is fully tested.**
+It does **not** yet mount arbitrary real-world macOS DMGs, process
+APFS, follow full HFS+ B-trees and overflow extents, install macOS
+`.app` bundles or `.pkg` scripts, or provide full Darwin/Cocoa.
+
 The development branch also probes **HFS+/HFSX volume and catalog B-tree headers** inside
 compressed DMGs, including catalog-extent metadata, without mounting
 or reading an actual HFS+ filesystem. `APPS/HFSPLUS.DMG` is a synthetic
