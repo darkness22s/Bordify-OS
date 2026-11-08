@@ -25,7 +25,11 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/armhello.mch
+
+$(BUILD)/apps/armhello.mch: tools/genarm64demo.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genarm64demo.py $@
 
 $(BUILD)/apps/dmgdemo.dmg: tools/genudifdemo.py
 	@mkdir -p $(BUILD)/apps
@@ -95,11 +99,16 @@ $(BUILD)/tests/udif_blkx_test: tests/udif_blkx_test.c kernel/udif_blkx.c kernel/
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/udif_blkx_test.c kernel/udif_blkx.c -o $@
 
-test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test
+$(BUILD)/tests/a64_macho_test: tests/a64_macho_test.c kernel/a64_macho.c kernel/a64_macho.h $(BUILD)/apps/armhello.mch
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/a64_macho_test.c kernel/a64_macho.c -o $@
+
+test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test
 	./$(BUILD)/tests/exec_inspect_test
 	./$(BUILD)/tests/package_inspect_test
 	./$(BUILD)/tests/win32_pe_test
 	./$(BUILD)/tests/udif_blkx_test
+	./$(BUILD)/tests/a64_macho_test
 
 clean:
 	rm -rf $(BUILD) dist
