@@ -1441,6 +1441,11 @@ int net_https_get(const char *host, uint16_t port, const char *path,
         tcp.active = false;
         return -1;
     }
+    if (total >= TCP_RX_MAX - 1) {
+        net_set_error("The HTTPS response exceeds the 64 KiB page limit");
+        tcp.active = false;
+        return -1;
+    }
     int status = 0;
     int result = http_extract(tls_rx, total, out, max_out,
                               location, location_size, &status);
