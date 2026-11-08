@@ -269,6 +269,29 @@ static void files_inspect_dmg_blocks(const fat_entry_t *entry,
                          volume.free_blocks, volume.catalog_first_block,
                          volume.catalog_extent_blocks);
             }
+            uint64_t catalog_sector;
+            if (hfsplus_catalog_first_sector(&volume, blocks.sector_count,
+                                              &catalog_sector) &&
+                udif_blkx_read_sector(&blocks,
+                                      blocks.sector_start + catalog_sector,
+                                      files_read_dmg_bytes, &file,
+                                      sector) == UDIF_IO_OK) {
+                hfsplus_catalog_info_t catalog;
+                if (hfsplus_catalog_probe(sector, sizeof(sector),
+                                           volume.catalog_logical_size,
+                                           &catalog)) {
+                    used = kstrlen(fs.viewer_text);
+                    if (used < sizeof(fs.viewer_text))
+                        snprintf(fs.viewer_text + used,
+                                 sizeof(fs.viewer_text) - used,
+                                 "\\nCatalog B-tree header verified (read-only)"
+                                 "\\nRoot node: %u; node size: %u"
+                                 "\\nLeaf records: %u; total nodes: %u"
+                                 "\\nCatalog traversal is NOT supported.",
+                                 catalog.root_node, catalog.node_size,
+                                 catalog.leaf_records, catalog.total_nodes);
+                }
+            }
         }
     }
 }
