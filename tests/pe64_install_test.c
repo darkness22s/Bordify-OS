@@ -62,10 +62,10 @@ int main(void) {
     assert(installed_size==0);
     assert(!pe64_vm_run(setup,size,memory,sizeof(memory),emit,NULL,&report));
     /* Unknown imports and missing PE header reject before effects. */
-    setup[0x4A2]='X';
+    setup[0x4C2]='X';
     assert(!pe64_vm_run_install(setup,size,memory,sizeof(memory),emit,NULL,
                                 save_app,NULL,&report));
-    setup[0x4A2]='C';
+    setup[0x4C2]='C';
     setup[0]='X';
     assert(!pe64_vm_run_install(setup,size,memory,sizeof(memory),emit,NULL,
                                 save_app,NULL,&report));
