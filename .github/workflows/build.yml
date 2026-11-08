@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential gcc-multilib nasm python3-pil fonts-dejavu-core \
-            dosfstools mtools parted grub-pc-bin grub-common qemu-utils xz-utils
+            dosfstools mtools parted grub-pc-bin grub-common qemu-utils qemu-system-x86 xz-utils
 
       - name: Test foreign executable header inspection
         run: make test
@@ -31,6 +31,29 @@ jobs:
 
       - name: Assemble disk images
         run: sudo bash scripts/build-image.sh
+
+      - name: QEMU boot smoke test
+        run: |
+          set -o pipefail
+          mkdir -p build
+          set +e
+          timeout --signal=TERM 25s qemu-system-i386 \
+            -drive file=dist/Bordify-OS.img,format=raw,if=ide \
+            -nic user,model=e1000 -m 128 -vga std -display none \
+            -serial file:build/qemu-serial.log -no-reboot -no-shutdown \
+            >build/qemu-output.log 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 124 ]; then
+            cat build/qemu-output.log
+            exit "$code"
+          fi
+          cat build/qemu-serial.log
+          grep -F "[kernel] starting desktop" build/qemu-serial.log
+          if grep -q "PANIC" build/qemu-serial.log; then
+            echo "Kernel panic during boot smoke test"
+            exit 1
+          fi
 
       - name: Show image hashes
         run: cat dist/SHA256SUMS
