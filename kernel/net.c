@@ -69,7 +69,7 @@
 
 #define ARP_CACHE_SIZE 8
 #define DNS_LOCAL_PORT 53001
-#define TCP_RX_MAX 65536
+#define TCP_RX_MAX (1024 * 1024)
 #define TLS_IO_TIMEOUT_MS 15000
 
 typedef struct {
@@ -825,6 +825,10 @@ static int tcp_read_stream(uint8_t *out, int max, uint32_t timeout_ms) {
         return -1;
     }
     uint32_t start = pit_ticks();
+    uint32_t timeout_ticks = (timeout_ms + 9u) / 10u;
+    if (!timeout_ticks) {
+        timeout_ticks = 1;
+    }
     for (;;) {
         if (tcp_rx_pos < tcp_rx_len) {
             int avail = tcp_rx_len - tcp_rx_pos;
@@ -846,7 +850,7 @@ static int tcp_read_stream(uint8_t *out, int max, uint32_t timeout_ms) {
         if (tcp.fin_recv) {
             return 0;
         }
-        if ((uint32_t)(pit_ticks() - start) >= timeout_ms) {
+        if ((uint32_t)(pit_ticks() - start) >= timeout_ticks) {
             net_set_error("The connection timed out");
             return -1;
         }
@@ -912,7 +916,7 @@ static void net_handle_tcp(const uint8_t *packet, int len) {
                 kmemcpy(tcp_rx + tcp_rx_len, payload, (size_t)copy);
                 tcp_rx_len += copy;
             }
-            tcp.recv_ack += (uint32_t)payload_len;
+            tcp.recv_ack += (uint32_t)copy;
             tcp_send(0x10, NULLPTR, 0);
         } else if (seq < tcp.recv_ack && payload_end > tcp.recv_ack) {
             uint32_t overlap = tcp.recv_ack - seq;
@@ -925,7 +929,7 @@ static void net_handle_tcp(const uint8_t *packet, int len) {
                 kmemcpy(tcp_rx + tcp_rx_len, payload + overlap, (size_t)copy);
                 tcp_rx_len += copy;
             }
-            tcp.recv_ack = payload_end;
+            tcp.recv_ack += (uint32_t)copy;
             tcp_send(0x10, NULLPTR, 0);
         } else {
             tcp_send(0x10, NULLPTR, 0);
@@ -1189,6 +1193,60 @@ static bool http_content_exceeds_buffer(const char *response, int len) {
     return len >= header_len && expected > (uint32_t)max_body;
 }
 
+static bool http_chunked_complete(const char *body, int len) {
+    const char *p = body;
+    const char *end = body + len;
+    while (p < end) {
+        const char *line_end = kstrstr(p, "\r\n");
+        if (!line_end || line_end >= end) {
+            return false;
+        }
+        uint32_t chunk_size = 0;
+        bool have_digit = false;
+        for (const char *q = p; q < line_end && *q != ';'; q++) {
+            uint32_t digit;
+            if (*q >= '0' && *q <= '9') {
+                digit = (uint32_t)(*q - '0');
+            } else if (*q >= 'a' && *q <= 'f') {
+                digit = (uint32_t)(*q - 'a' + 10);
+            } else if (*q >= 'A' && *q <= 'F') {
+                digit = (uint32_t)(*q - 'A' + 10);
+            } else {
+                return false;
+            }
+            if (chunk_size > (UINT32_MAX - digit) / 16u) {
+                return false;
+            }
+            chunk_size = chunk_size * 16u + digit;
+            have_digit = true;
+        }
+        if (!have_digit) {
+            return false;
+        }
+        p = line_end + 2;
+        if (chunk_size == 0) {
+            while (p < end) {
+                const char *trailer_end = kstrstr(p, "\r\n");
+                if (!trailer_end || trailer_end >= end) {
+                    return false;
+                }
+                if (trailer_end == p) {
+                    return true;
+                }
+                p = trailer_end + 2;
+            }
+            return false;
+        }
+        size_t available = (size_t)(end - p);
+        if (available < 2 || chunk_size > available - 2 ||
+            p[chunk_size] != '\r' || p[chunk_size + 1] != '\n') {
+            return false;
+        }
+        p += chunk_size + 2u;
+    }
+    return false;
+}
+
 static bool http_complete(const char *response, int len) {
     const char *header_end = kstrstr(response, "\r\n\r\n");
     if (!header_end) {
@@ -1198,17 +1256,30 @@ static bool http_complete(const char *response, int len) {
     char value[128];
     if (http_header(response, "Transfer-Encoding", value, sizeof(value)) &&
         http_ci_prefix(value, "chunked")) {
-        const char *chunk = header_end + 4;
-        if (body_len >= 5 && kstrncmp(chunk, "0\r\n\r\n", 5) == 0) {
-            return true;
-        }
-        return kstrstr(chunk, "\r\n0\r\n\r\n") != NULLPTR;
+        return http_chunked_complete(header_end + 4, body_len);
     }
     if (http_header(response, "Content-Length", value, sizeof(value))) {
         int expected = katoi(value);
         return expected >= 0 && body_len >= expected;
     }
     return false;
+}
+
+static bool http_close_delimited(const char *response, int len) {
+    const char *header_end = kstrstr(response, "\r\n\r\n");
+    if (!header_end || len < (int)(header_end - response) + 4) {
+        return false;
+    }
+    int status = http_parse_status(response);
+    if (status < 200 || status > 599) {
+        return false;
+    }
+    char value[128];
+    if (http_header(response, "Transfer-Encoding", value, sizeof(value)) ||
+        http_header(response, "Content-Length", value, sizeof(value))) {
+        return false;
+    }
+    return true;
 }
 
 static uint64_t tls_rdtsc(void) {
@@ -1409,19 +1480,19 @@ int net_https_get(const char *host, uint16_t port, const char *path,
     br_sslio_init(&tls_io, &tls_client.eng, tls_read_cb, NULLPTR,
                   tls_write_cb, NULLPTR);
 
-    char host_header[192];
+    char host_header[320];
     if (port == 443) {
         kstrncpy(host_header, host, sizeof(host_header) - 1);
         host_header[sizeof(host_header) - 1] = 0;
     } else {
         snprintf(host_header, sizeof(host_header), "%s:%u", host, port);
     }
-    char request[640];
+    char request[2048];
     int request_len = snprintf(request, sizeof(request),
-                               "GET %s HTTP/1.0\r\n"
+                               "GET %s HTTP/1.1\r\n"
                                "Host: %s\r\n"
-                               "User-Agent: Bordify/1.0\r\n"
-                               "Accept: text/html,text/plain\r\n"
+                               "User-Agent: Mozilla/5.0 (compatible; Bordify/1.0)\r\n"
+                               "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5\r\n"
                                "Accept-Encoding: identity\r\n"
                                "Connection: close\r\n\r\n",
                                path, host_header);
@@ -1444,7 +1515,8 @@ int net_https_get(const char *host, uint16_t port, const char *path,
         if (n < 0) {
             unsigned err = br_ssl_engine_last_error(&tls_client.eng);
             tls_rx[total] = 0;
-            if (!total || !http_complete(tls_rx, total)) {
+            if (!total || (!http_complete(tls_rx, total) &&
+                          !(tcp.fin_recv && http_close_delimited(tls_rx, total)))) {
                 tls_set_error(err);
                 tcp.active = false;
                 return -1;
@@ -1457,7 +1529,7 @@ int net_https_get(const char *host, uint16_t port, const char *path,
         total += n;
         tls_rx[total] = 0;
         if (http_content_exceeds_buffer(tls_rx, total)) {
-            net_set_error("The HTTPS response exceeds the 64 KiB page limit");
+            net_set_error("The HTTPS response exceeds the 1 MiB page limit");
             tcp.active = false;
             return -1;
         }
@@ -1472,7 +1544,7 @@ int net_https_get(const char *host, uint16_t port, const char *path,
         return -1;
     }
     if (total >= TCP_RX_MAX - 1) {
-        net_set_error("The HTTPS response exceeds the 64 KiB page limit");
+        net_set_error("The HTTPS response exceeds the 1 MiB page limit");
         tcp.active = false;
         return -1;
     }
@@ -1535,19 +1607,19 @@ int net_http_get(const char *host, uint16_t port, const char *path,
     tcp_rx_len = 0;
     tcp_rx_pos = 0;
 
-    char host_header[192];
+    char host_header[320];
     if (port == 80) {
         kstrncpy(host_header, host, sizeof(host_header) - 1);
         host_header[sizeof(host_header) - 1] = 0;
     } else {
         snprintf(host_header, sizeof(host_header), "%s:%u", host, port);
     }
-    char request[640];
+    char request[2048];
     int request_len = snprintf(request, sizeof(request),
-                               "GET %s HTTP/1.0\r\n"
+                               "GET %s HTTP/1.1\r\n"
                                "Host: %s\r\n"
-                               "User-Agent: Bordify/1.0\r\n"
-                               "Accept: text/html,text/plain\r\n"
+                               "User-Agent: Mozilla/5.0 (compatible; Bordify/1.0)\r\n"
+                               "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5\r\n"
                                "Accept-Encoding: identity\r\n"
                                "Connection: close\r\n\r\n",
                                path, host_header);

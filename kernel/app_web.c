@@ -9,8 +9,8 @@
 #include "string.h"
 #include "printf.h"
 
-#define WEB_PAGE_SIZE 65536
-#define WEB_URL_SIZE 192
+#define WEB_PAGE_SIZE (1024 * 1024)
+#define WEB_URL_SIZE 1024
 #define WEB_HISTORY 12
 #define WEB_MAX_LINKS 160
 
@@ -607,6 +607,9 @@ static bool web_parse_url(const char *url, char *host, size_t host_size,
     while (*p && *p != '#' && path_len + 1 < path_size) {
         path[path_len++] = *p++;
     }
+    if (*p && *p != '#') {
+        return false;
+    }
     path[path_len] = 0;
     if (!path[0]) {
         kstrcpy(path, "/");
@@ -623,7 +626,7 @@ static bool web_resolve_location(const char *base, const char *location,
         kstrcpy(out, location);
         return true;
     }
-    char host[192];
+    char host[256];
     uint16_t port;
     bool secure;
     char base_path[WEB_URL_SIZE];
@@ -678,7 +681,7 @@ static void web_fetch_page(web_state_t *ws, const char *url) {
     kstrncpy(current, url, sizeof(current) - 1);
     current[sizeof(current) - 1] = 0;
     for (int redirect = 0; redirect < 5; redirect++) {
-        char host[192];
+        char host[256];
         uint16_t port;
         bool secure;
         char path[WEB_URL_SIZE];
@@ -697,6 +700,8 @@ static void web_fetch_page(web_state_t *ws, const char *url) {
             : net_http_get(host, port, path, ws->page, WEB_PAGE_SIZE,
                            location, sizeof(location), &status);
         if (bytes < 0) {
+            kprintf("[web] %s request failed: %s\n",
+                    secure ? "HTTPS" : "HTTP", net_last_error());
             set_error_page(ws, "Could not load page", net_last_error());
             return;
         }
