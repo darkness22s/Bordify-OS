@@ -99,16 +99,21 @@ $(BUILD)/tests/udif_blkx_test: tests/udif_blkx_test.c kernel/udif_blkx.c kernel/
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/udif_blkx_test.c kernel/udif_blkx.c -o $@
 
+$(BUILD)/tests/zlib_inflate_test: tests/zlib_inflate_test.c kernel/zlib_inflate.c kernel/zlib_inflate.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/zlib_inflate_test.c kernel/zlib_inflate.c -lz -o $@
+
 $(BUILD)/tests/a64_macho_test: tests/a64_macho_test.c kernel/a64_macho.c kernel/a64_macho.h $(BUILD)/apps/armhello.mch
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/a64_macho_test.c kernel/a64_macho.c -o $@
 
-test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test
+test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test
 	./$(BUILD)/tests/exec_inspect_test
 	./$(BUILD)/tests/package_inspect_test
 	./$(BUILD)/tests/win32_pe_test
 	./$(BUILD)/tests/udif_blkx_test
 	./$(BUILD)/tests/a64_macho_test
+	./$(BUILD)/tests/zlib_inflate_test
 
 clean:
 	rm -rf $(BUILD) dist
