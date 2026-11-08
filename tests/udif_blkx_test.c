@@ -95,6 +95,26 @@ int main(void) {
     assert(wrote > 0 && (size_t)wrote < sizeof(xml));
     assert(udif_blkx_from_xml(xml, (size_t)wrote, 64, 4096, &map));
     assert(map.runs_count == 2);
+    /* 324 bytes encode as an unpadded complete quartet. Extra '='
+     * characters must not be accepted as harmless trailing garbage. */
+    assert(n+4<sizeof(encoded));
+    encoded[n++]='=';
+    encoded[n]=0;
+    wrote=snprintf(xml,sizeof(xml),
+        "<plist><dict><key>resource-fork</key><dict>"
+        "<key>blkx</key><array><dict><key>Data</key><data>%s</data>"
+        "</dict></array></dict></dict></plist>",encoded);
+    assert(wrote>0 && (size_t)wrote<sizeof(xml));
+    assert(!udif_blkx_from_xml(xml,(size_t)wrote,64,4096,&map));
+    encoded[n++]='=';
+    encoded[n++]='=';
+    encoded[n]=0;
+    wrote=snprintf(xml,sizeof(xml),
+        "<plist><dict><key>resource-fork</key><dict>"
+        "<key>blkx</key><array><dict><key>Data</key><data>%s</data>"
+        "</dict></array></dict></dict></plist>",encoded);
+    assert(wrote>0 && (size_t)wrote<sizeof(xml));
+    assert(!udif_blkx_from_xml(xml,(size_t)wrote,64,4096,&map));
     assert(!udif_blkx_from_xml("<plist>oops</plist>", 19, 64, 4096, &map));
 
     /* Verify true zlib-compressed blkx data, not just raw/zero runs. */
