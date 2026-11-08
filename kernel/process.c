@@ -313,14 +313,20 @@ void process_handle_interrupt(uint32_t *frame) {
                 frame[7] = length;
                 return;
             }
-            case 3: /* Win32 CreateFileA: EBX=name, ECX=access, EDX=disposition */
+            case 3: { /* Win32 CreateFileA */
+                uint32_t name=frame[4], access=frame[6], disposition=frame[5];
                 frame[7]=active_win32 ?
                     win32_files_open(&win32_files,
                         (const uint8_t *)(uintptr_t)PROCESS_USER_BASE,
                         PROCESS_USER_BASE,PROCESS_USER_BYTES,
-                        frame[4],frame[6],frame[5],
+                        name,access,disposition,
                         win32_load_file,NULLPTR) : UINT32_MAX;
+#ifdef BORDIFY_CHROME_PROBE
+                kprintf("[win32-trace] CreateFileA ptr=%x access=%x mode=%u -> handle=%x last_error=%u\n",
+                        name,access,disposition,frame[7],win32_files.last_error);
+#endif
                 return;
+            }
             case 4: /* Win32 WriteFile: EBX=handle, ECX=buffer, EDX=size */
                 frame[7]=active_win32 ?
                     (uint32_t)win32_files_write(&win32_files,frame[4],
@@ -335,11 +341,17 @@ void process_handle_interrupt(uint32_t *frame) {
                         PROCESS_USER_BASE,PROCESS_USER_BYTES,
                         frame[6],frame[5]) : UINT32_MAX;
                 return;
-            case 6: /* Win32 CloseHandle: EBX=handle */
+            case 6: { /* Win32 CloseHandle */
+                uint32_t handle=frame[4], len=win32_files.size;
                 frame[7]=active_win32 &&
-                    win32_files_close(&win32_files,frame[4],
+                    win32_files_close(&win32_files,handle,
                                       win32_save_file,NULLPTR) ? 1u : 0u;
+#ifdef BORDIFY_CHROME_PROBE
+                kprintf("[win32-trace] CloseHandle=%x size=%u -> %u err=%u\n",
+                        handle,len,frame[7],win32_files.last_error);
+#endif
                 return;
+            }
             case 7: /* Win32 GetLastError */
                 frame[7]=active_win32 ? win32_files.last_error : 0u;
                 return;
