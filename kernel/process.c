@@ -60,17 +60,15 @@ static bool user_range(uint32_t address, uint32_t length) {
 }
 
 static bool cpu_supports_pse(void) {
-    uint32_t maxleaf, features;
+    uint32_t a, b, c, d;
     __asm__ volatile("cpuid"
-                     : "=a"(maxleaf)
-                     : "a"(0)
-                     : "ebx", "ecx", "edx");
-    if (maxleaf < 1) return false;
+                     : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                     : "a"(0));
+    if (a < 1) return false;
     __asm__ volatile("cpuid"
-                     : "=d"(features)
-                     : "a"(1)
-                     : "eax", "ebx", "ecx");
-    return (features & (1u << 3)) != 0;
+                     : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                     : "a"(1));
+    return (d & (1u << 3)) != 0;
 }
 
 void process_init(void) {
