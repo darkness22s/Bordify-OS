@@ -23,7 +23,7 @@ jobs:
             build-essential gcc-multilib nasm python3-pil fonts-dejavu-core \
             dosfstools mtools parted grub-pc-bin grub-common qemu-utils qemu-system-x86 xz-utils
 
-      - name: Test foreign executable header inspection
+      - name: Test executable and Win32 PE32 compatibility layers
         run: make test
 
       - name: Compile kernel and user process
@@ -55,6 +55,9 @@ jobs:
           grep -F "[process] ELF32 user program exited 0" build/qemu-serial.log
           grep -F "[process] isolated user fault 14" build/qemu-serial.log
           grep -F "[process] ELF32 user program exited -1" build/qemu-serial.log
+          grep -F "[win32] launched PE32 console in ring 3 with 3 kernel32 imports" build/qemu-serial.log
+          grep -F "BORDIFY WIN32: WriteFile through kernel32 compatibility layer" build/qemu-serial.log
+          grep -F "[win32] PE32 process exited 0" build/qemu-serial.log
           grep -F "[kernel] starting desktop" build/qemu-serial.log
           if grep -q "PANIC" build/qemu-serial.log; then
             echo "Kernel panic during boot smoke test"
