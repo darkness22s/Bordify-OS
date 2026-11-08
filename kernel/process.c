@@ -6,6 +6,7 @@
 #include "printf.h"
 #include "string.h"
 #include "win32_pe.h"
+#include "win32_files.h"
 
 #define PAGE_PRESENT 0x001u
 #define PAGE_RW      0x002u
@@ -46,6 +47,28 @@ typedef struct {
 static bool ready;
 static bool running;
 static int exit_status;
+static bool active_win32;
+static win32_files_t win32_files;
+/* The Windows guest never supplies an arbitrary FAT16 destination. */
+static int win32_load_file(uint8_t *out,size_t capacity,void *context) {
+    (void)context;
+    fat_entry_t apps,entry;
+    if (!fat16_mounted() || !fat16_find(0,"APPS",&apps) ||
+        !fat16_find(apps.cluster,"WIN32.TXT",&entry) ||
+        (entry.attr & FAT_ATTR_DIRECTORY) ||
+        entry.size>capacity) return -1;
+    return fat16_read(apps.cluster,"WIN32.TXT",out,(uint32_t)capacity);
+}
+static bool win32_save_file(const uint8_t *data,size_t count,void *context) {
+    (void)context;
+    fat_entry_t apps,entry;
+    if (!fat16_mounted() || !fat16_find(0,"APPS",&apps) ||
+        !(apps.attr & FAT_ATTR_DIRECTORY) ||
+        fat16_write(apps.cluster,"WIN32.TXT",data,(uint32_t)count)!=(int)count ||
+        !fat16_find(apps.cluster,"WIN32.TXT",&entry) ||
+        entry.size!=(uint32_t)count) return false;
+    return true;
+}
 static uint32_t *page_directory;
 static uint32_t *user_page_table;
 static uint8_t *user_memory;
@@ -244,12 +267,15 @@ int process_run_win32_pe(const char *directory, const char *filename) {
         return -1;
     }
 
+    win32_files_reset(&win32_files);
+    active_win32=true;
     running = true;
     exit_status = -1;
     kprintf("[win32] launched PE32 console in ring 3 with %u kernel32 imports\n",
             image.imported_functions);
     process_enter(image.entry, PROCESS_USER_BASE + PROCESS_USER_BYTES - 16);
     running = false;
+    active_win32=false;
     kprintf("[win32] PE32 process exited %d\n", exit_status);
     return exit_status;
 }
@@ -277,6 +303,36 @@ void process_handle_interrupt(uint32_t *frame) {
                 frame[7] = length;
                 return;
             }
+            case 3: /* Win32 CreateFileA: EBX=name, ECX=access, EDX=disposition */
+                frame[7]=active_win32 ?
+                    win32_files_open(&win32_files,
+                        (const uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+                        PROCESS_USER_BASE,PROCESS_USER_BYTES,
+                        frame[4],frame[6],frame[5],
+                        win32_load_file,NULLPTR) : UINT32_MAX;
+                return;
+            case 4: /* Win32 WriteFile: EBX=handle, ECX=buffer, EDX=size */
+                frame[7]=active_win32 ?
+                    (uint32_t)win32_files_write(&win32_files,frame[4],
+                        (const uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+                        PROCESS_USER_BASE,PROCESS_USER_BYTES,
+                        frame[6],frame[5]) : UINT32_MAX;
+                return;
+            case 5: /* Win32 ReadFile: EBX=handle, ECX=buffer, EDX=size */
+                frame[7]=active_win32 ?
+                    (uint32_t)win32_files_read(&win32_files,frame[4],
+                        (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+                        PROCESS_USER_BASE,PROCESS_USER_BYTES,
+                        frame[6],frame[5]) : UINT32_MAX;
+                return;
+            case 6: /* Win32 CloseHandle: EBX=handle */
+                frame[7]=active_win32 &&
+                    win32_files_close(&win32_files,frame[4],
+                                      win32_save_file,NULLPTR) ? 1u : 0u;
+                return;
+            case 7: /* Win32 GetLastError */
+                frame[7]=active_win32 ? win32_files.last_error : 0u;
+                return;
             case 2: /* exit: EBX = signed status */
                 exit_status = (int)frame[4];
                 running = false;
