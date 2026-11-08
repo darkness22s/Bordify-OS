@@ -45,6 +45,7 @@ def main(path):
     b[raw(0x12d0):raw(0x12d0)+len(MESSAGE)]=MESSAGE
 
     code=bytearray()
+    code+=b"\x48\x83\xec\x28"   # Win64 shadow space, RSP 16-byte aligned
     def ripcall(iat):
         at=0x1000+len(code)
         code.extend(b"\xff\x15"+struct.pack("<i",iat-(at+6)))
@@ -54,8 +55,9 @@ def main(path):
     at=0x1000+len(code)
     code+=b"\x48\x8d\x15"+struct.pack("<i",0x12d0-(at+7)) # RDX = msg
     code+=b"\x41\xb8"+struct.pack("<I",len(MESSAGE))        # R8D = bytes
-    code+=b"\x45\x31\xc9"                       # R9D = NULL
-    code+=b"\x48\x83\xec\x28"                   # Win64 shadow+alignment
+    at=0x1000+len(code)
+    code+=b"\x4c\x8d\x0d"+struct.pack("<i",0x1380-(at+7)) # R9 = DWORD bytesWritten
+    # Home space reserved before the first imported function call.
     code+=b"\xc7\x44\x24\x20"+struct.pack("<I",0) # fifth arg NULL
     ripcall(0x1280)                              # WriteFile()
     code+=b"\x48\xc7\xc1"+struct.pack("<I",0) # exit status
