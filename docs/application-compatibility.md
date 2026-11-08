@@ -60,15 +60,15 @@ Notes: executable/container prefix inspection examines only the bytes File Manag
 - **MSI:** OLE/CFB signature alone is not proof of a Windows Installer database; use the MSI directory/stream structures to validate and install under a Windows Installer-compatible runtime.
 - **Hardware:** Plan a x86-64 kernel and 64-bit boot path while keeping the current 32-bit boot image working until a tested replacement exists.
 
-### Stage 0.9 — Bounded HFS+ root-file extraction and extent validation (under CI verification)
+### Stage 0.9 — Bounded HFS+ root-file extent and allocation validation (verified)
 
 A narrow read-only `hfsplus_read` path can locate a root-directory ASCII-named file in a **single 512-byte catalog leaf** and read its first contiguous data-fork extent through UDIF. The generated `MOUNT.DMG` fixture contains an actual catalog leaf pointing to a tiny generated `DARWIN.MCH` Mach-O payload, rather than only a catalog header. This is a synthetic, constrained HFS+ sample, **not** a general HFS+ mount, APFS parser, or macOS installer.
 
 The latest hardening stores the validated HFS+ volume allocation-block count in the mount and rejects file extents that exceed it, including caller-forged first blocks or extent lengths even when raw backing sectors are otherwise accessible. Unit tests cover forged file extents, malformed catalog offsets, invalid leaf records, invalid root parent IDs, corrupted filesystem signatures and read errors. Catalog overflow extents, multi-node B-trees, non-ASCII names, symlinks, compression and larger files remain unsupported. Do not execute any extracted payload with kernel privilege.
 
-### Stage 0.8 — Bounded HFS+ catalog B-tree header probing (verified)
+### Stage 0.7b — Earlier synthetic HFS+ catalog-header fixture (verified)
 
-The read-only HFS+ probe now validates the catalog fork's logical size and first extent before calculating the first catalog sector. It reads that sector through the existing UDIF reader and checks a 512-byte B-tree header node, its descriptor, tree depth, root/leaf node indexes, node counts, and record-offset table. Unsupported larger node sizes are rejected rather than partially interpreted. Both the Files inspector and QEMU integration fixture exercise this path. The fixture's B-tree header is **synthetic**, with no usable leaf records or directory hierarchy; no HFS+ directory enumeration, file extraction, or mounting is claimed.
+The read-only HFS+ probe now validates the catalog fork's logical size and first extent before calculating the first catalog sector. It reads that sector through the existing UDIF reader and checks a 512-byte B-tree header node, its descriptor, tree depth, root/leaf node indexes, node counts, and record-offset table. Unsupported larger node sizes are rejected rather than partially interpreted. Both the Files inspector and QEMU integration fixture exercise this path. The **HFSPLUS.DMG header-only fixture** has no usable leaf records. A **different fixture**, MOUNT.DMG, supplies a valid root catalog leaf and supports bounded read-only extraction as described in Stage 0.8 below; neither is a general HFS+ mount.
 
 ### Stage 0.8 — Read-only HFS+ mount + contained app extraction and execution (QEMU verified)
 
