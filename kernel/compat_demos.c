@@ -42,6 +42,29 @@ int compat_win64_demo_run(void) {
     kprintf("[win64] PE32+ interpreter rejected test executable\n");
     return -1;
 }
+/* Clang ARM64 Mach-O with real _objc_getClass, _sel_registerName,
+ * _objc_msgSend relocations statically bound to an explicit LC_NOTE.
+ * Models NSString, an NSWindow's lifecycle, and NSApplication state.
+ */
+int compat_cocoa_lifecycle_run(void) {
+    uint32_t length=load_demo("COCOA.MCH");
+    a64_report_t result;
+    if (length && a64_macho_run_darwin(file_data,length,arm_memory,
+                                       sizeof(arm_memory),serial_bytes,
+                                       NULLPTR,&result) &&
+        result.finished && result.exit_code==0 &&
+        result.objc_linked_calls==25 &&
+        result.cocoa_window_created && result.cocoa_window_visible &&
+        result.cocoa_window_title_set &&
+        result.cocoa_application_started &&
+        result.cocoa_application_terminated) {
+        kprintf("[darwin-cocoa] ARM64 ObjC-linked NSString/NSWindow/NSApplication lifecycle passed; %u imports, exit %d\n",
+                result.objc_linked_calls,result.exit_code);
+        return 0;
+    }
+    kprintf("[darwin-cocoa] ARM64 linked Objective-C lifecycle rejected or failed\n");
+    return -1;
+}
 int compat_darwin_demo_run(void) {
     uint32_t length=load_demo("DARWIN.MCH");
     a64_report_t d;
@@ -161,6 +184,7 @@ void compat_vm_demos(void) {
     compat_win64_demo_run();
     compat_win64_installer_run();
     compat_darwin_demo_run();
+    compat_cocoa_lifecycle_run();
     compat_arm64_workload_run();
     compat_arm64_c_run();
     dmg_install_demo();
