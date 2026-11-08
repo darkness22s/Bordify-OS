@@ -72,6 +72,12 @@ int main(void) {
     roundtrip(32768, Z_BEST_COMPRESSION, Z_DEFAULT_STRATEGY);
     roundtrip(32768, Z_BEST_COMPRESSION, Z_FIXED);
 
+    /* Deliberately sparse dynamic Huffman alphabets: most code lengths
+     * are zero. Decoder must never address an unpopulated symbol. */
+    for (size_t i = 0; i < sizeof(source); ++i)
+        source[i]=(uint8_t)((i%101u)==0 ? 'Z' : ((i%13u)==0 ? 'B' : 'A'));
+    roundtrip(32768,Z_BEST_COMPRESSION,Z_DEFAULT_STRATEGY);
+
     for (size_t i = 0; i < sizeof(source); ++i)
         source[i] = (uint8_t)random32();
     roundtrip(512, Z_BEST_COMPRESSION, Z_DEFAULT_STRATEGY);
