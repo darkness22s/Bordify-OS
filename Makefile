@@ -25,7 +25,7 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch $(BUILD)/apps/mount.dmg
 
 $(BUILD)/apps/win64setup.exe: tools/genwin64setup.py $(BUILD)/apps/win64demo.exe
 	@mkdir -p $(BUILD)/apps
@@ -34,6 +34,10 @@ $(BUILD)/apps/win64setup.exe: tools/genwin64setup.py $(BUILD)/apps/win64demo.exe
 $(BUILD)/apps/win64demo.exe: tools/genwin64demo.py
 	@mkdir -p $(BUILD)/apps
 	$(PYTHON) tools/genwin64demo.py $@
+
+$(BUILD)/apps/mount.dmg: tools/genhfsmount.py $(BUILD)/apps/darwin.mch
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genhfsmount.py $@ $(BUILD)/apps/darwin.mch
 
 $(BUILD)/apps/darwin.mch: tools/gendarwindemo.py
 	@mkdir -p $(BUILD)/apps
@@ -143,7 +147,12 @@ $(BUILD)/tests/darwin_macho_test: tests/darwin_macho_test.c kernel/a64_macho.c k
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/darwin_macho_test.c kernel/a64_macho.c kernel/darwin_objc.c -o $@
 
-test: $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+$(BUILD)/tests/hfsplus_read_test: tests/hfsplus_read_test.c kernel/hfsplus_read.c kernel/hfsplus_probe.c kernel/udif_blkx.c kernel/zlib_inflate.c kernel/package_inspect.c $(BUILD)/apps/mount.dmg
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/hfsplus_read_test.c kernel/hfsplus_read.c kernel/hfsplus_probe.c kernel/udif_blkx.c kernel/zlib_inflate.c kernel/package_inspect.c -lz -o $@
+
+test: $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+	./$(BUILD)/tests/hfsplus_read_test
 	./$(BUILD)/tests/pe64_vm_test
 	./$(BUILD)/tests/pe64_install_test
 	./$(BUILD)/tests/darwin_macho_test
