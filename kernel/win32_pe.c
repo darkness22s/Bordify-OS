@@ -117,6 +117,42 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
     return terminated;
 }
 
+/* Standard PE32 IMAGE_BASE_RELOCATION / IMAGE_REL_BASED_HIGHLOW.
+ * Maps a legitimate preferred Windows image base into the isolated
+ * Bordify user address range, without executing any code at ring 0.
+ * No unbounded reloc block traversal, unknown relocation types or TLS.
+ */
+static bool apply_pe32_relocations(uint8_t *memory,uint32_t image_size,
+                                   uint32_t base,uint32_t reloc_rva,
+                                   uint32_t reloc_size) {
+    if (base==WIN32_PE_USER_BASE) return true;
+    if (!reloc_rva || reloc_size<8 ||
+        !fits(image_size,reloc_rva,reloc_size)) return false;
+    size_t end=(size_t)reloc_rva+reloc_size;
+    size_t cursor=reloc_rva;
+    uint32_t delta=WIN32_PE_USER_BASE-base; /* uint32 modulo arithmetic */
+    while(cursor<end) {
+        if (!fits(end,cursor,8)) return false;
+        uint32_t page=rd32(memory+cursor);
+        uint32_t block=rd32(memory+cursor+4);
+        if (block<8 || (block&1u) || block>end-cursor)
+            return false;
+        for(uint32_t at=8;at<block;at+=2) {
+            uint16_t entry=rd16(memory+cursor+at);
+            unsigned type=(entry>>12)&15u;
+            if(type==0u) continue; /* IMAGE_REL_BASED_ABSOLUTE padding */
+            if(type!=3u) return false; /* unsupported relocated width */
+            uint64_t where=(uint64_t)page+(entry&0x0fffu);
+            if(where>image_size || 4u>image_size-(size_t)where)
+                return false;
+            uint32_t old=rd32(memory+(size_t)where);
+            wr32(memory+(size_t)where,old+delta);
+        }
+        cursor+=block;
+    }
+    return cursor==end;
+}
+
 bool win32_pe_stage(const uint8_t *file, size_t file_size,
                     uint8_t *memory, size_t memory_size,
                     win32_pe_info_t *info) {
@@ -140,9 +176,14 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
         !(flags & 0x0002) || !fits(file_size, nt + 24, optional_size)) return false;
 
     size_t opt = nt + 24;
-    if (rd16(file + opt) != 0x010b || rd32(file + opt + 28) != WIN32_PE_USER_BASE ||
+    if (rd16(file + opt) != 0x010b ||
         rd16(file + opt + 68) != 3 || /* IMAGE_SUBSYSTEM_WINDOWS_CUI */
         rd32(file + opt + 92) < 16) return false;
+    uint32_t image_base=rd32(file+opt+28);
+    uint32_t reloc_rva=rd32(file+opt+96+5u*8u);
+    uint32_t reloc_size=rd32(file+opt+96+5u*8u+4u);
+    if (image_base!=WIN32_PE_USER_BASE && (flags&0x0001u))
+        return false; /* stripped relocations cannot be safely rebased */
     uint32_t entry_rva = rd32(file + opt + 16);
     uint32_t image_size = rd32(file + opt + 56);
     uint32_t headers_size = rd32(file + opt + 60);
@@ -199,6 +240,8 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
         copy_bytes(memory + virtual_rva, file + raw_offset, raw_size);
     }
 
+    if (!apply_pe32_relocations(memory,image_size,image_base,
+                                reloc_rva,reloc_size)) return false;
     uint32_t imported = 0;
     if (!fix_imports(memory, image_size, import_rva, import_size, &imported))
         return false;
