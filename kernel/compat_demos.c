@@ -1,6 +1,7 @@
 #include "compat_demos.h"
 #include "pe64_vm.h"
 #include "a64_macho.h"
+#include "dmg_install.h"
 #include "fat16.h"
 #include "serial.h"
 #include "printf.h"
@@ -106,4 +107,5 @@ void compat_vm_demos(void) {
     compat_win64_demo_run();
     compat_win64_installer_run();
     compat_darwin_demo_run();
+    dmg_install_demo();
 }
