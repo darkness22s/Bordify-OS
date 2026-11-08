@@ -25,7 +25,15 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/darwin.mch
+
+$(BUILD)/apps/win64demo.exe: tools/genwin64demo.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genwin64demo.py $@
+
+$(BUILD)/apps/darwin.mch: tools/gendarwindemo.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/gendarwindemo.py $@
 
 $(BUILD)/apps/armhello.mch: tools/genarm64demo.py
 	@mkdir -p $(BUILD)/apps
@@ -111,15 +119,25 @@ $(BUILD)/tests/zlib_inflate_test: tests/zlib_inflate_test.c kernel/zlib_inflate.
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/zlib_inflate_test.c kernel/zlib_inflate.c -lz -o $@
 
-$(BUILD)/tests/a64_macho_test: tests/a64_macho_test.c kernel/a64_macho.c kernel/a64_macho.h $(BUILD)/apps/armhello.mch
+$(BUILD)/tests/a64_macho_test: tests/a64_macho_test.c kernel/a64_macho.c kernel/a64_macho.h kernel/darwin_objc.c kernel/darwin_objc.h $(BUILD)/apps/armhello.mch
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/a64_macho_test.c kernel/a64_macho.c -o $@
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/a64_macho_test.c kernel/a64_macho.c kernel/darwin_objc.c -o $@
 
 $(BUILD)/tests/hfsplus_probe_test: tests/hfsplus_probe_test.c kernel/hfsplus_probe.c kernel/hfsplus_probe.h
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/hfsplus_probe_test.c kernel/hfsplus_probe.c -o $@
 
-test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+$(BUILD)/tests/pe64_vm_test: tests/pe64_vm_test.c kernel/pe64_vm.c kernel/pe64_vm.h $(BUILD)/apps/win64demo.exe
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/pe64_vm_test.c kernel/pe64_vm.c -o $@
+
+$(BUILD)/tests/darwin_macho_test: tests/darwin_macho_test.c kernel/a64_macho.c kernel/darwin_objc.c kernel/darwin_objc.h $(BUILD)/apps/darwin.mch
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/darwin_macho_test.c kernel/a64_macho.c kernel/darwin_objc.c -o $@
+
+test: $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+	./$(BUILD)/tests/pe64_vm_test
+	./$(BUILD)/tests/darwin_macho_test
 	./$(BUILD)/tests/exec_inspect_test
 	./$(BUILD)/tests/package_inspect_test
 	./$(BUILD)/tests/win32_pe_test
