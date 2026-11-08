@@ -789,6 +789,8 @@ int fat16_read_range(uint16_t dir_cluster, const char *name,
         return -1;
     }
     uint32_t wanted = MIN(entry.size - offset, max_size);
+    /* Return type is int; larger successful reads would wrap negative. */
+    if (wanted > 0x7fffffffu) return -1;
     if (!wanted) return 0;
 
     /* Walk the FAT chain without reading the skipped data clusters. */
