@@ -27,7 +27,7 @@ static uint32_t load_demo(const char *name) {
         return 0;
     return file.size;
 }
-void compat_vm_demos(void) {
+int compat_win64_demo_run(void) {
     uint32_t length=load_demo("WIN64.EXE");
     pe64_report_t w;
     if (length && pe64_vm_run(file_data,length,x64_memory,sizeof(x64_memory),
@@ -35,10 +35,13 @@ void compat_vm_demos(void) {
         w.finished && w.exit_code==0) {
         kprintf("[win64] PE32+ AMD64 interpreted safely; %u imports; exited %d\n",
                 w.imports,w.exit_code);
-    } else {
-        kprintf("[win64] PE32+ interpreter rejected test executable\n");
+        return w.exit_code;
     }
-    length=load_demo("DARWIN.MCH");
+    kprintf("[win64] PE32+ interpreter rejected test executable\n");
+    return -1;
+}
+int compat_darwin_demo_run(void) {
+    uint32_t length=load_demo("DARWIN.MCH");
     a64_report_t d;
     if (length && a64_macho_run_darwin(file_data,length,arm_memory,
                                        sizeof(arm_memory),serial_bytes,
@@ -46,7 +49,12 @@ void compat_vm_demos(void) {
         d.finished && d.exit_code==0) {
         kprintf("[darwin] ARM64 BSD syscall and NSString/NSApplication bridge verified; exited %d\n",
                 d.exit_code);
-    } else {
-        kprintf("[darwin] ARM64 compatibility bridge rejected test executable\n");
+        return d.exit_code;
     }
+    kprintf("[darwin] ARM64 compatibility bridge rejected test executable\n");
+    return -1;
+}
+void compat_vm_demos(void) {
+    compat_win64_demo_run();
+    compat_darwin_demo_run();
 }
