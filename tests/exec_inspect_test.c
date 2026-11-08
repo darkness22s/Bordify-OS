@@ -52,6 +52,8 @@ static void test_macho(void) {
     le32(b + 4, 0x0100000c);
     assert(exec_inspect(b, sizeof(b), &info));
     assert(info.valid && info.format == EXEC_FORMAT_MACHO64 && info.arch == EXEC_ARCH_ARM64);
+    /* A declared 72-byte command cannot fit in a 64-byte input. */
+    assert(exec_inspect(b, 64, &info) && !info.valid);
     assert(exec_inspect(b, 16, &info) && !info.valid);
     clear(b, sizeof(b));
     /* Apple universal Mach-O, two architecture entries. */
@@ -73,6 +75,8 @@ static void test_elf_and_unknown(void) {
     assert(exec_inspect(b, sizeof(b), &info));
     assert(info.valid && info.format == EXEC_FORMAT_ELF64 && info.arch == EXEC_ARCH_ARM64);
     assert(exec_inspect(b, 4, &info) && !info.valid);
+    /* ELF class is present, endianness byte absent: no read past input. */
+    assert(exec_inspect(b, 5, &info) && !info.valid);
     assert(exec_inspect(b, 32, &info) && !info.valid);
 }
 
