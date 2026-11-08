@@ -25,6 +25,19 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 - Revisit **Android** via a substantial hosted Android runtime (Linux-kernel compatibility, drivers, or a guest VM/emulator). A full Android emulator is not feasible in the present 32-bit 128 MiB QEMU configuration.
 - Treat **iPhone simulators** as a separate, much harder effort requiring a compatible mobile OS/framework environment; Apple's simulator components have platform and licensing restrictions. Do not imply that a Mach-O loader can run iOS apps.
 
+## HFS+ allocation bitmap verification (security hardening)
+
+The restricted read-only HFS+ catalog/file extractor now checks the volume's
+allocation-file fork metadata and requires its first extent to contain the
+complete bitmap. Before using the catalog extent or extracting file bytes,
+the reader checks each allocation block's MSB-first allocation bit through
+the same bounded, read-only UDIF sector callback. An extent that points at
+a free block is rejected even if the physical disk-image sector exists.
+Malformed, fragmented, or unavailable bitmap metadata fails closed.
+The synthetic HFS+ fixture has one allocation-bitmap extent; this change
+does **not** implement extent-overflow trees, general HFS+ mounts, APFS,
+or arbitrary macOS application installation.
+
 ## Implementation sequence
 
 ### Stage 0 — Safe discovery (this PR)
