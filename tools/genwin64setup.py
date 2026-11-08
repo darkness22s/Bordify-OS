@@ -71,7 +71,9 @@ def main(output, payload):
     add(b"\x48\x89\xc1")       # rcx=rax (file handle)
     lea(0x15,0x1400)            # rdx -> embedded PE32+ program
     mov_r8(len(app))
-    add(b"\x45\x31\xc9")       # lpNumberOfBytesWritten=NULL
+    at=0x1000+len(code)
+    add(b"\x4c\x8d\x0d"+struct.pack("<i",0x13c0-(at+7)))
+    # R9 points to a writable DWORD lpNumberOfBytesWritten
     mov_stack(0x20,0)           # lpOverlapped=NULL
     call(0x1298)                # WriteFile
     add(b"\x48\x89\xd9")       # rcx=rbx
