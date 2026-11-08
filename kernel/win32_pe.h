@@ -14,8 +14,8 @@
  * this loader stages and validates only and never executes guest code.
  */
 #define WIN32_PE_USER_BASE 0x40000000u
-#define WIN32_PE_MAX_IMAGE (192u * 1024u)
-#define WIN32_PE_RUNTIME_OFFSET (196u * 1024u)
+#define WIN32_PE_MAX_IMAGE (1536u * 1024u)
+#define WIN32_PE_RUNTIME_OFFSET (1664u * 1024u)
 
 typedef struct {
     uint32_t entry;
