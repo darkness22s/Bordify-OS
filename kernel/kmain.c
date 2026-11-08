@@ -21,6 +21,7 @@
 #include "process.h"
 #include "udif_demo.h"
 #include "a64_demo.h"
+#include "compat_demos.h"
 
 extern uint8_t kernel_end;
 
@@ -98,6 +99,8 @@ void kernel_main(uint32_t mb_info_address) {
             kprintf("[win32] demo failed (status %d)\n", win32_result);
         }
     }
+
+    compat_vm_demos();
 
     gui_init();
     kprintf("[kernel] starting desktop\n");
