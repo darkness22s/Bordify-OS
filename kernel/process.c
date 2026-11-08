@@ -1,0 +1,249 @@
+#include "process.h"
+#include "gdt.h"
+#include "heap.h"
+#include "fat16.h"
+#include "serial.h"
+#include "printf.h"
+#include "string.h"
+
+#define PAGE_PRESENT 0x001u
+#define PAGE_RW      0x002u
+#define PAGE_USER    0x004u
+#define PAGE_LARGE   0x080u
+#define PROCESS_USER_PAGES (PROCESS_USER_BYTES / 4096u)
+#define PROCESS_MAX_ELF_BYTES (64u * 1024u)
+#define PROCESS_STACK_RESERVE (16u * 1024u)
+
+typedef struct {
+    uint8_t ident[16];
+    uint16_t type;
+    uint16_t machine;
+    uint32_t version;
+    uint32_t entry;
+    uint32_t phoff;
+    uint32_t shoff;
+    uint32_t flags;
+    uint16_t ehsize;
+    uint16_t phentsize;
+    uint16_t phnum;
+    uint16_t shentsize;
+    uint16_t shnum;
+    uint16_t shstrndx;
+} PACKED elf_header_t;
+
+typedef struct {
+    uint32_t type;
+    uint32_t offset;
+    uint32_t vaddr;
+    uint32_t paddr;
+    uint32_t filesz;
+    uint32_t memsz;
+    uint32_t flags;
+    uint32_t align;
+} PACKED elf_segment_t;
+
+static bool ready;
+static bool running;
+static int exit_status;
+static uint32_t *page_directory;
+static uint32_t *user_page_table;
+static uint8_t *user_memory;
+
+/* Assembly switches to ring 3 via iret and returns when process_leave runs. */
+extern void process_enter(uint32_t entry, uint32_t user_stack);
+extern NORETURN void process_leave(void);
+
+static bool user_range(uint32_t address, uint32_t length) {
+    return address >= PROCESS_USER_BASE &&
+           address - PROCESS_USER_BASE <= PROCESS_USER_BYTES &&
+           length <= PROCESS_USER_BYTES - (address - PROCESS_USER_BASE);
+}
+
+static bool cpu_supports_pse(void) {
+    uint32_t maxleaf, features;
+    __asm__ volatile("cpuid"
+                     : "=a"(maxleaf)
+                     : "a"(0)
+                     : "ebx", "ecx", "edx");
+    if (maxleaf < 1) return false;
+    __asm__ volatile("cpuid"
+                     : "=d"(features)
+                     : "a"(1)
+                     : "eax", "ebx", "ecx");
+    return (features & (1u << 3)) != 0;
+}
+
+void process_init(void) {
+    if (ready) return;
+    if (!cpu_supports_pse()) {
+        kprintf("[process] CPU does not support 4 MiB pages; user mode unavailable\n");
+        return;
+    }
+
+    page_directory = (uint32_t *)kmalloc_aligned(4096, 4096);
+    user_page_table = (uint32_t *)kmalloc_aligned(4096, 4096);
+    user_memory = (uint8_t *)kmalloc_aligned(PROCESS_USER_BYTES, 4096);
+
+    /*
+     * Identity-map the 32-bit address space for the existing kernel, using
+     * supervisor-only 4 MiB pages. MMIO and the GRUB framebuffer therefore
+     * retain their addresses. The single user PDE replaces the 1-GiB
+     * identity mapping with only 256 KiB of explicitly user-accessible RAM.
+     * This is a transitional design, NOT mature VM management.
+     */
+    for (uint32_t i = 0; i < 1024; ++i) {
+        page_directory[i] = (i << 22) | PAGE_PRESENT | PAGE_RW | PAGE_LARGE;
+    }
+    kmemset(user_page_table, 0, 4096);
+    kmemset(user_memory, 0, PROCESS_USER_BYTES);
+    for (uint32_t i = 0; i < PROCESS_USER_PAGES; ++i) {
+        user_page_table[i] =
+            (uint32_t)(uintptr_t)(user_memory + i * 4096) |
+            PAGE_PRESENT | PAGE_RW | PAGE_USER;
+    }
+    page_directory[PROCESS_USER_BASE >> 22] =
+        (uint32_t)(uintptr_t)user_page_table |
+        PAGE_PRESENT | PAGE_RW | PAGE_USER;
+
+    uintptr_t directory = (uintptr_t)page_directory;
+    __asm__ volatile(
+        "mov %%cr4, %%eax\n"
+        "or $0x10, %%eax\n"
+        "mov %%eax, %%cr4\n"
+        "mov %0, %%cr3\n"
+        "mov %%cr0, %%eax\n"
+        "or $0x80010000, %%eax\n" /* PG and WP */
+        "mov %%eax, %%cr0\n"
+        : : "r"(directory) : "eax", "memory");
+
+    ready = true;
+    kprintf("[process] paging on; ring-3 address range 0x%08x - 0x%08x\n",
+            PROCESS_USER_BASE, PROCESS_USER_BASE + PROCESS_USER_BYTES);
+}
+
+static bool load_elf32(const uint8_t *file, uint32_t size, uint32_t *entry) {
+    if (size < sizeof(elf_header_t)) return false;
+    const elf_header_t *elf = (const elf_header_t *)file;
+    if (elf->ident[0] != 0x7f || elf->ident[1] != 'E' ||
+        elf->ident[2] != 'L' || elf->ident[3] != 'F' ||
+        elf->ident[4] != 1 || elf->ident[5] != 1 ||
+        elf->ident[6] != 1 || elf->type != 2 ||
+        elf->machine != 3 || elf->version != 1 ||
+        elf->ehsize != sizeof(elf_header_t) ||
+        elf->phentsize != sizeof(elf_segment_t) ||
+        elf->phnum == 0 || elf->phnum > 16 ||
+        elf->phoff > size ||
+        elf->phnum > (size - elf->phoff) / sizeof(elf_segment_t)) {
+        return false;
+    }
+    bool entry_is_executable = false;
+    unsigned loaded = 0;
+    const uint8_t *ph = file + elf->phoff;
+
+    /* First pass: validate everything before modifying the process image. */
+    for (unsigned i = 0; i < elf->phnum; ++i) {
+        const elf_segment_t *s =
+            (const elf_segment_t *)(ph + i * sizeof(elf_segment_t));
+        if (s->type == 2 || s->type == 3) return false; /* DYNAMIC/INTERP */
+        if (s->type != 1) continue; /* PT_LOAD */
+        if (s->memsz == 0 || s->filesz > s->memsz ||
+            s->offset > size || s->filesz > size - s->offset ||
+            !user_range(s->vaddr, s->memsz) ||
+            s->vaddr + s->memsz > PROCESS_USER_BASE +
+                                           PROCESS_USER_BYTES - PROCESS_STACK_RESERVE) {
+            return false;
+        }
+        if ((s->flags & 1u) &&
+            elf->entry >= s->vaddr && elf->entry - s->vaddr < s->memsz) {
+            entry_is_executable = true;
+        }
+        ++loaded;
+    }
+    if (!loaded || !entry_is_executable) return false;
+
+    kmemset((void *)(uintptr_t)PROCESS_USER_BASE, 0, PROCESS_USER_BYTES);
+    for (unsigned i = 0; i < elf->phnum; ++i) {
+        const elf_segment_t *s =
+            (const elf_segment_t *)(ph + i * sizeof(elf_segment_t));
+        if (s->type != 1) continue;
+        uint8_t *dst = (uint8_t *)(uintptr_t)s->vaddr;
+        kmemset(dst, 0, s->memsz);
+        kmemcpy(dst, file + s->offset, s->filesz);
+    }
+    *entry = elf->entry;
+    return true;
+}
+
+int process_run_elf32(const char *directory, const char *filename) {
+    if (!ready || running || !fat16_mounted()) return -1;
+
+    fat_entry_t folder, file_entry;
+    if (!fat16_find(0, directory, &folder) ||
+        !(folder.attr & FAT_ATTR_DIRECTORY) ||
+        !fat16_find(folder.cluster, filename, &file_entry) ||
+        (file_entry.attr & FAT_ATTR_DIRECTORY) ||
+        file_entry.size < sizeof(elf_header_t) ||
+        file_entry.size > PROCESS_MAX_ELF_BYTES) {
+        kprintf("[process] ELF32 program not found/unsupported: %s/%s\n",
+                directory, filename);
+        return -1;
+    }
+    uint8_t *elf_bytes = (uint8_t *)kmalloc(file_entry.size);
+    if (fat16_read(folder.cluster, filename, elf_bytes, file_entry.size) !=
+        (int)file_entry.size) {
+        kprintf("[process] could not read ELF32 program\n");
+        return -1;
+    }
+
+    uint32_t entry;
+    if (!load_elf32(elf_bytes, file_entry.size, &entry)) {
+        kprintf("[process] invalid or unsupported ELF32 image\n");
+        return -1;
+    }
+    running = true;
+    exit_status = -1;
+    kprintf("[process] launching ELF32 at 0x%08x (ring 3)\n", entry);
+    process_enter(entry, PROCESS_USER_BASE + PROCESS_USER_BYTES - 16);
+    running = false;
+    kprintf("[process] ELF32 user program exited %d\n", exit_status);
+    return exit_status;
+}
+
+void process_handle_interrupt(uint32_t *frame) {
+    uint32_t vector = frame[8];
+    uint32_t cs = frame[11];
+    if (!running || (cs & 3u) != 3u) {
+        panic("unexpected user interrupt %u (cs=0x%x)", vector, cs);
+    }
+
+    if (vector == 0x80) {
+        switch (frame[7]) { /* EAX = syscall */
+            case 1: { /* write serial: EBX = buffer, ECX = length */
+                uint32_t pointer = frame[4];
+                uint32_t length = frame[6];
+                if (length > 256 || !user_range(pointer, length)) {
+                    frame[7] = (uint32_t)-1;
+                    return;
+                }
+                const uint8_t *data = (const uint8_t *)(uintptr_t)pointer;
+                for (uint32_t i = 0; i < length; ++i) {
+                    serial_putc((char)data[i]);
+                }
+                frame[7] = length;
+                return;
+            }
+            case 2: /* exit: EBX = signed status */
+                exit_status = (int)frame[4];
+                running = false;
+                process_leave();
+            default:
+                frame[7] = (uint32_t)-38; /* ENOSYS */
+                return;
+        }
+    }
+    kprintf("[process] isolated user fault %u at 0x%08x (err 0x%08x)\n",
+            vector, frame[10], frame[9]);
+    exit_status = -1;
+    running = false;
+    process_leave();
+}
