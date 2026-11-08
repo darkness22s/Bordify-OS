@@ -34,6 +34,11 @@ int main(void) {
     assert(memory[WIN32_PE_RUNTIME_OFFSET] == 0x8b);
     assert(memory[WIN32_PE_RUNTIME_OFFSET + 2 * 64] == 0x53);
 
+    /* Section table at 0x178..0x1a0 must fit in SizeOfHeaders.
+     * Input bytes existing beyond that declared boundary are not enough. */
+    p32(image + 0x80 + 24 + 60, 0x190);
+    assert(!win32_pe_stage(image,n,memory,256*1024,&result));
+    p32(image + 0x80 + 24 + 60, 0x200);
     assert(!win32_pe_stage(image, 128, memory, 256 * 1024, &result));
     image[0x84] = 0x64; image[0x85] = 0x86; /* PE64 machine */
     assert(!win32_pe_stage(image, n, memory, 256 * 1024, &result));
