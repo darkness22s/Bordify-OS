@@ -84,7 +84,7 @@ bool win32_files_close(win32_files_t *rt,uint32_t handle,
         rt->last_error=WIN32_FILE_ERROR_INVALID_HANDLE;return false;
     }
     if (rt->write_mode &&
-        (!save || !rt->size || !save(rt->data,rt->size,context))) {
+        (!save || !save(rt->data,rt->size,context))) {
         rt->last_error=WIN32_FILE_ERROR_ACCESS;return false;
     }
     rt->open=false;rt->write_mode=false;rt->last_error=0;return true;
