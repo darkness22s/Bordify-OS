@@ -6,6 +6,7 @@ KERNEL="$ROOT/build/bordify.elf"
 DEMO="$ROOT/build/apps/hello.elf"
 FAULT="$ROOT/build/apps/fault.elf"
 WIN32="$ROOT/build/apps/winhello.exe"
+WINIO="$ROOT/build/apps/winio.exe"
 WIN64="$ROOT/build/apps/win64demo.exe"
 WINSETUP="$ROOT/build/apps/win64setup.exe"
 DARWIN="$ROOT/build/apps/darwin.mch"
@@ -23,7 +24,7 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$WIN64" ] || [ ! -f "$WINSETUP" ] || [ ! -f "$DARWIN" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$HFSPLUS" ] || [ ! -f "$MOUNTDMG" ] || [ ! -f "$ARM" ] || [ ! -f "$ARMWORK" ] || [ ! -f "$ARMCALC" ]; then
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$WINIO" ] || [ ! -f "$WIN64" ] || [ ! -f "$WINSETUP" ] || [ ! -f "$DARWIN" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$HFSPLUS" ] || [ ! -f "$MOUNTDMG" ] || [ ! -f "$ARM" ] || [ ! -f "$ARMWORK" ] || [ ! -f "$ARMCALC" ]; then
     echo "Missing kernel or demo executables; run make first." >&2
     exit 1
 fi
@@ -81,6 +82,7 @@ MOUNTED=1
 "${SUDO[@]}" cp "$DEMO" "$MNT/APPS/HELLO.ELF"
 "${SUDO[@]}" cp "$FAULT" "$MNT/APPS/FAULT.ELF"
 "${SUDO[@]}" cp "$WIN32" "$MNT/APPS/WINHELLO.EXE"
+"${SUDO[@]}" cp "$WINIO" "$MNT/APPS/WINIO.EXE"
 "${SUDO[@]}" cp "$WIN64" "$MNT/APPS/WIN64.EXE"
 "${SUDO[@]}" cp "$WINSETUP" "$MNT/APPS/SETUP64.EXE"
 "${SUDO[@]}" cp "$DARWIN" "$MNT/APPS/DARWIN.MCH"
