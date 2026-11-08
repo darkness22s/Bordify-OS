@@ -10,6 +10,7 @@
 #include "printf.h"
 #include "exec_inspect.h"
 #include "package_inspect.h"
+#include "process.h"
 
 #define FILES_MAX_ENTRIES 128
 #define FILES_VIEWER_SIZE 14336
@@ -203,6 +204,15 @@ static void files_open_selected(void) {
     fat_entry_t *entry = &fs.entries[fs.selected];
     if (entry->attr & FAT_ATTR_DIRECTORY) {
         files_enter_dir(entry);
+        return;
+    }
+    /* Native ELF32 apps are launched from /APPS in isolated ring 3.
+     * PE/Mach-O remain inspection-only until their runtimes are available. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kends_with(entry->name, ".ELF")) {
+        int code = process_run_elf32("APPS", entry->name);
+        set_status(code == 0 ? "Native app exited successfully" :
+                               "Native app failed; inspect serial log");
         return;
     }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
@@ -487,14 +497,15 @@ static void draw_sidebar(gui_window_t *window, files_layout_t *l) {
     gfx_vline(sx + l->sidebar_w, sy, sy + sh - 1, settings_line());
     gfx_text(&font_ui_small, sx + 18, sy + 16, "LOCATIONS", settings_muted());
 
-    const char *labels[4] = { "Home", "Documents", "Web", "System" };
-    for (int i = 0; i < 4; i++) {
+    const char *labels[5] = { "Home", "Documents", "Web", "System", "Apps" };
+    for (int i = 0; i < 5; i++) {
         int iy = sy + 42 + i * 38;
         int ix = sx + 10;
         bool active = (i == 0 && fs.depth == 0) ||
                       (i == 1 && kstricmp(fs.path, "/DOCS") == 0) ||
                       (i == 2 && kstricmp(fs.path, "/WEB") == 0) ||
-                      (i == 3 && kstricmp(fs.path, "/SYSTEM") == 0);
+                      (i == 3 && kstricmp(fs.path, "/SYSTEM") == 0) ||
+                      (i == 4 && kstricmp(fs.path, "/APPS") == 0);
         bool hover = ui_point_in(ix, iy, l->sidebar_w - 20, 32, mouse.x, mouse.y);
         if (active || hover) {
             gfx_rounded_fill(ix, iy, l->sidebar_w - 20, 32, 7,
@@ -701,6 +712,10 @@ static void files_sidebar_click(int x, int y, files_layout_t *l) {
             } else if (i == 3) {
                 if (!files_go_named_in_root("SYSTEM")) {
                     set_status("System folder missing");
+                }
+            } else if (i == 4) {
+                if (!files_go_named_in_root("APPS")) {
+                    set_status("Apps folder missing");
                 }
             }
             return;
