@@ -42,6 +42,7 @@ static bool decode_base64(const char *src, size_t n, uint8_t *dst,
     uint32_t carry = 0;
     unsigned bits = 0;
     bool padding = false;
+    unsigned pad_count=0;
     size_t count = 0;
     unsigned useful = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -49,6 +50,7 @@ static bool decode_base64(const char *src, size_t n, uint8_t *dst,
         if (space(ch)) continue;
         if (ch == '=') {
             padding = true;
+            if (++pad_count>2) return false;
             continue;
         }
         int v = base64_char(ch);
@@ -63,7 +65,14 @@ static bool decode_base64(const char *src, size_t n, uint8_t *dst,
             carry &= (1u << bits) - 1u;
         }
     }
-    if (useful < 4 || bits >= 6 || carry) return false;
+    /* RFC 4648: only complete quartets, 1 '=' after 3 symbols or
+     * 2 '=' after 2 symbols; unused low bits must be zero. */
+    if (useful<2 || bits>=6 || carry ||
+        (useful+pad_count)%4u!=0u ||
+        (pad_count==0 && useful%4u!=0u) ||
+        (pad_count==1 && useful%4u!=3u) ||
+        (pad_count==2 && useful%4u!=2u))
+        return false;
     *written = count;
     return true;
 }
