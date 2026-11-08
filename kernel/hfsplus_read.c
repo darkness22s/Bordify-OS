@@ -19,7 +19,8 @@ static bool range(size_t bound, size_t off, size_t size) {
 }
 static bool read_sector(const hfsplus_mount_t *m, uint64_t relative,
                         uint8_t out[512]) {
-    if (relative >= m->map->sector_count) return false;
+    if (!m || !m->map || relative >= m->map->sector_count ||
+        m->map->sector_start > UINT64_MAX - relative) return false;
     return udif_blkx_read_sector(m->map,m->map->sector_start+relative,
                                   m->reader,m->context,out)==UDIF_IO_OK;
 }
