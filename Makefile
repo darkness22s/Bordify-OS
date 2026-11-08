@@ -25,11 +25,15 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/armhello.mch
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/armhello.mch
 
 $(BUILD)/apps/armhello.mch: tools/genarm64demo.py
 	@mkdir -p $(BUILD)/apps
 	$(PYTHON) tools/genarm64demo.py $@
+
+$(BUILD)/apps/zdmg.dmg: tools/genudifdemo.py
+	@mkdir -p $(BUILD)/apps
+	$(PYTHON) tools/genudifdemo.py $@ --zlib
 
 $(BUILD)/apps/dmgdemo.dmg: tools/genudifdemo.py
 	@mkdir -p $(BUILD)/apps
@@ -95,9 +99,9 @@ $(BUILD)/tests/win32_pe_test: tests/win32_pe_test.c kernel/win32_pe.c kernel/win
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_pe_test.c kernel/win32_pe.c -o $@
 
-$(BUILD)/tests/udif_blkx_test: tests/udif_blkx_test.c kernel/udif_blkx.c kernel/udif_blkx.h
+$(BUILD)/tests/udif_blkx_test: tests/udif_blkx_test.c kernel/udif_blkx.c kernel/udif_blkx.h kernel/zlib_inflate.c kernel/zlib_inflate.h
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/udif_blkx_test.c kernel/udif_blkx.c -o $@
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/udif_blkx_test.c kernel/udif_blkx.c kernel/zlib_inflate.c -lz -o $@
 
 $(BUILD)/tests/zlib_inflate_test: tests/zlib_inflate_test.c kernel/zlib_inflate.c kernel/zlib_inflate.h
 	@mkdir -p $(BUILD)/tests
