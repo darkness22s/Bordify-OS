@@ -55,6 +55,29 @@ void rtc_read(rtc_time_t *out) {
     out->weekday = weekday;
 }
 
+static int32_t rtc_days_from_civil(int year, unsigned month, unsigned day) {
+    year -= month <= 2;
+    int era = (year >= 0 ? year : year - 399) / 400;
+    unsigned yoe = (unsigned)(year - era * 400);
+    int mp = (int)month + ((int)month > 2 ? -3 : 9);
+    unsigned doy = (unsigned)((153 * mp + 2) / 5) + day - 1u;
+    unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return era * 146097 + (int32_t)doe - 719468;
+}
+
+uint32_t rtc_unix_time(void) {
+    rtc_time_t now;
+    rtc_read(&now);
+    if (now.year < 1970 || now.year > 2105 ||
+        now.month < 1 || now.month > 12 || now.day < 1 || now.day > 31 ||
+        now.hour > 23 || now.minute > 59 || now.second > 59) {
+        return 0;
+    }
+    int32_t days = rtc_days_from_civil((int)now.year, now.month, now.day);
+    return (uint32_t)days * 86400u + (uint32_t)now.hour * 3600u +
+           (uint32_t)now.minute * 60u + (uint32_t)now.second;
+}
+
 void rtc_format_time(char *out, size_t size) {
     rtc_time_t now;
     rtc_read(&now);

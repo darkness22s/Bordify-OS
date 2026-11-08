@@ -273,3 +273,47 @@ int ksplit_words(const char *s, char words[][32], int max_words) {
     }
     return count;
 }
+
+void *memcpy(void *dst, const void *src, size_t n) {
+    return kmemcpy(dst, src, n);
+}
+
+void *memmove(void *dst, const void *src, size_t n) {
+    return kmemmove(dst, src, n);
+}
+
+void *memset(void *dst, int value, size_t n) {
+    return kmemset(dst, value, n);
+}
+
+int memcmp(const void *a, const void *b, size_t n) {
+    return kmemcmp(a, b, n);
+}
+
+size_t strlen(const char *s) {
+    return kstrlen(s);
+}
+
+int strcmp(const char *a, const char *b) {
+    return kstrcmp(a, b);
+}
+
+int strncmp(const char *a, const char *b, size_t n) {
+    return kstrncmp(a, b, n);
+}
+
+char *strcpy(char *dst, const char *src) {
+    return kstrcpy(dst, src);
+}
+
+char *strncpy(char *dst, const char *src, size_t n) {
+    return kstrncpy(dst, src, n);
+}
+
+char *strchr(const char *s, int c) {
+    return kstrchr(s, c);
+}
+
+char *strstr(const char *haystack, const char *needle) {
+    return kstrstr(haystack, needle);
+}

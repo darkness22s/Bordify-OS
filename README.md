@@ -28,11 +28,10 @@ and a rounded dock along the bottom edge.
 folders and text files, rename items, read documents, and delete files.
 Every change is written to the FAT16 disk image.
 
-**web** is a native HTML reader for the documents in `WEB/` and for plain
-HTTP pages on the network. It parses the installed pages, renders formatted
+**web** is a native HTML reader for the documents in `WEB/` and for HTTP/HTTPS pages on the network. It parses the installed pages, renders formatted
 text, and follows clickable links. It does not use a host browser. The
 network stack talks to an Intel e1000 adapter and uses the QEMU/VirtualBox
-user-mode NAT address range. Plain HTTP is supported; HTTPS is not.
+user-mode NAT address range. HTTP and HTTPS (TLS 1.2) are supported.
 
 **Settings** changes the theme, wallpaper and accent, and writes them to
 `SYSTEM/SETTINGS.CFG`. It also shows kernel, memory, display, disk, clock

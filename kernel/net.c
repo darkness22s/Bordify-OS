@@ -4,6 +4,9 @@
 #include "string.h"
 #include "printf.h"
 #include "pit.h"
+#include "rtc.h"
+#include "bearssl.h"
+#include "tls_trust.h"
 
 #define NET_IP(a, b, c, d) \
     (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
@@ -67,6 +70,7 @@
 #define ARP_CACHE_SIZE 8
 #define DNS_LOCAL_PORT 53001
 #define TCP_RX_MAX 65536
+#define TLS_IO_TIMEOUT_MS 15000
 
 typedef struct {
     uint64_t addr;
@@ -136,7 +140,14 @@ static uint16_t dns_id;
 static tcp_state_t tcp;
 static uint8_t tcp_rx[TCP_RX_MAX];
 static int tcp_rx_len;
+static int tcp_rx_pos;
 static uint16_t tcp_port_counter;
+
+static br_ssl_client_context tls_client;
+static br_x509_minimal_context tls_x509;
+static br_sslio_context tls_io;
+static unsigned char tls_iobuf[BR_SSL_BUFSIZE_BIDI];
+static char tls_rx[TCP_RX_MAX];
 
 static void net_poll(void);
 
@@ -747,6 +758,8 @@ static bool tcp_send(uint8_t flags, const uint8_t *payload, int len) {
 
 static bool tcp_connect(uint32_t remote_ip, uint16_t remote_port) {
     kmemset(&tcp, 0, sizeof(tcp));
+    tcp_rx_len = 0;
+    tcp_rx_pos = 0;
     tcp.active = true;
     tcp.remote_ip = remote_ip;
     tcp.remote_port = remote_port;
@@ -791,6 +804,71 @@ static bool tcp_connect(uint32_t remote_ip, uint16_t remote_port) {
     return false;
 }
 
+static void tcp_rx_compact(void) {
+    if (tcp_rx_pos <= 0) {
+        return;
+    }
+    if (tcp_rx_pos >= tcp_rx_len) {
+        tcp_rx_pos = 0;
+        tcp_rx_len = 0;
+        return;
+    }
+    int remain = tcp_rx_len - tcp_rx_pos;
+    kmemmove(tcp_rx, tcp_rx + tcp_rx_pos, (size_t)remain);
+    tcp_rx_pos = 0;
+    tcp_rx_len = remain;
+}
+
+static int tcp_read_stream(uint8_t *out, int max, uint32_t timeout_ms) {
+    if (!tcp.active) {
+        net_set_error("The TCP connection is not open");
+        return -1;
+    }
+    uint32_t start = pit_ticks();
+    for (;;) {
+        if (tcp_rx_pos < tcp_rx_len) {
+            int avail = tcp_rx_len - tcp_rx_pos;
+            int copy = MIN(avail, max);
+            kmemcpy(out, tcp_rx + tcp_rx_pos, (size_t)copy);
+            tcp_rx_pos += copy;
+            if (tcp_rx_pos >= tcp_rx_len) {
+                tcp_rx_pos = 0;
+                tcp_rx_len = 0;
+            } else if (tcp_rx_pos > 4096) {
+                tcp_rx_compact();
+            }
+            return copy;
+        }
+        if (tcp.reset) {
+            net_set_error("The remote server reset the connection");
+            return -1;
+        }
+        if (tcp.fin_recv) {
+            return 0;
+        }
+        if ((uint32_t)(pit_ticks() - start) >= timeout_ms) {
+            net_set_error("The connection timed out");
+            return -1;
+        }
+        net_poll();
+        pit_sleep_ms(1);
+    }
+}
+
+static int tcp_write_stream(const uint8_t *data, int len) {
+    int total = len;
+    while (len > 0) {
+        int chunk = len > 1400 ? 1400 : len;
+        if (!tcp_send(0x18, data, chunk)) {
+            net_set_error("Could not send data over TCP");
+            return -1;
+        }
+        data += chunk;
+        len -= chunk;
+    }
+    return total;
+}
+
 static void net_handle_tcp(const uint8_t *packet, int len) {
     if (len < 20 || !tcp.active) {
         return;
@@ -824,6 +902,9 @@ static void net_handle_tcp(const uint8_t *packet, int len) {
         return;
     }
     if (payload_len > 0) {
+        if ((int)sizeof(tcp_rx) - 1 - tcp_rx_len < payload_len) {
+            tcp_rx_compact();
+        }
         if (seq == tcp.recv_ack) {
             int space = (int)sizeof(tcp_rx) - 1 - tcp_rx_len;
             int copy = MIN(space, payload_len);
@@ -1105,6 +1186,273 @@ static bool http_complete(const char *response, int len) {
     return false;
 }
 
+static uint64_t tls_rdtsc(void) {
+    uint32_t lo;
+    uint32_t hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+static bool tls_cpu_has_rdrand(void) {
+    uint32_t eax;
+    uint32_t ebx;
+    uint32_t ecx;
+    uint32_t edx;
+    __asm__ volatile("cpuid"
+                     : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+                     : "a"(1u));
+    UNUSED(eax);
+    UNUSED(ebx);
+    UNUSED(edx);
+    return (ecx & (1u << 30)) != 0;
+}
+
+static bool tls_rdrand32(uint32_t *value) {
+    uint32_t result;
+    unsigned char ok;
+    __asm__ volatile("rdrand %0\n\tsetc %1" : "=r"(result), "=qm"(ok));
+    if (ok) {
+        *value = result;
+    }
+    return ok != 0;
+}
+
+static void tls_fill_entropy(uint8_t *out, size_t len) {
+    uint64_t tsc = tls_rdtsc();
+    uint32_t state = (uint32_t)tsc ^ (uint32_t)(tsc >> 32) ^
+                     pit_ticks() ^ rtc_unix_time() ^ 0xA5A5A5A5u;
+    bool have_rdrand = tls_cpu_has_rdrand();
+    for (size_t i = 0; i < len; i += 4) {
+        uint32_t value;
+        if (!have_rdrand || !tls_rdrand32(&value)) {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            value = state ^ pit_ticks() ^ (uint32_t)tsc;
+        }
+        for (size_t j = 0; j < 4 && i + j < len; j++) {
+            out[i + j] = (uint8_t)(value >> (j * 8));
+        }
+        tsc = tsc * 6364136223846793005ULL + 1u;
+    }
+}
+
+static int tls_read_cb(void *ctx, unsigned char *data, size_t len) {
+    UNUSED(ctx);
+    return tcp_read_stream(data, (int)len, TLS_IO_TIMEOUT_MS);
+}
+
+static int tls_write_cb(void *ctx, const unsigned char *data, size_t len) {
+    UNUSED(ctx);
+    return tcp_write_stream(data, (int)len);
+}
+
+static void tls_set_error(unsigned err) {
+    if (net_error[0]) {
+        return;
+    }
+    if (err >= BR_ERR_RECV_FATAL_ALERT && err < BR_ERR_SEND_FATAL_ALERT) {
+        unsigned alert = err - BR_ERR_RECV_FATAL_ALERT;
+        switch (alert) {
+        case 40:
+            net_set_error("The server rejected the TLS handshake");
+            break;
+        case 70:
+        case 71:
+            net_set_error("The server does not support TLS 1.2");
+            break;
+        case 112:
+            net_set_error("The server did not recognize this host name");
+            break;
+        case 113:
+        case 116:
+            net_set_error("The server rejected the TLS certificate exchange");
+            break;
+        default: {
+            char message[96];
+            snprintf(message, sizeof(message),
+                     "The server sent a TLS alert (%u)", alert);
+            net_set_error(message);
+            break;
+        }
+        }
+        return;
+    }
+    switch (err) {
+    case BR_ERR_OK:
+        return;
+    case BR_ERR_BAD_PARAM:
+        net_set_error("TLS parameter error");
+        break;
+    case BR_ERR_BAD_STATE:
+        net_set_error("TLS internal state error");
+        break;
+    case BR_ERR_UNSUPPORTED_VERSION:
+    case BR_ERR_BAD_VERSION:
+        net_set_error("The server does not support TLS 1.2");
+        break;
+    case BR_ERR_BAD_LENGTH:
+    case BR_ERR_TOO_LARGE:
+        net_set_error("The server sent a malformed TLS record");
+        break;
+    case BR_ERR_BAD_MAC:
+        net_set_error("TLS record authentication failed");
+        break;
+    case BR_ERR_NO_RANDOM:
+        net_set_error("No entropy is available for TLS");
+        break;
+    case BR_ERR_UNKNOWN_TYPE:
+    case BR_ERR_UNEXPECTED:
+        net_set_error("The server sent an unexpected TLS message");
+        break;
+    case BR_ERR_BAD_CIPHER_SUITE:
+        net_set_error("No shared TLS cipher suite");
+        break;
+    case BR_ERR_BAD_HANDSHAKE:
+        net_set_error("The TLS handshake failed");
+        break;
+    case BR_ERR_X509_NOT_TRUSTED:
+        net_set_error("The server certificate is not trusted");
+        break;
+    case BR_ERR_X509_BAD_SERVER_NAME:
+        net_set_error("The certificate does not match the server name");
+        break;
+    case BR_ERR_X509_EXPIRED:
+        net_set_error("The server certificate is expired or not yet valid");
+        break;
+    case BR_ERR_X509_INVALID_VALUE:
+    case BR_ERR_X509_TRUNCATED:
+        net_set_error("The server certificate is invalid");
+        break;
+    case BR_ERR_IO:
+        net_set_error("The TLS connection was interrupted");
+        break;
+    default:
+        net_set_error("TLS connection failed");
+        break;
+    }
+}
+
+int net_https_get(const char *host, uint16_t port, const char *path,
+                  char *out, uint32_t max_out,
+                  char *location, size_t location_size,
+                  int *status_out) {
+    if (!net_up) {
+        net_set_error("No network adapter is available");
+        return -1;
+    }
+    if (!out || !max_out) {
+        net_set_error("The HTTPS response buffer is invalid");
+        return -1;
+    }
+    if (status_out) {
+        *status_out = 0;
+    }
+    if (location && location_size) {
+        location[0] = 0;
+    }
+    net_error[0] = 0;
+    uint32_t ip;
+    if (!net_dns_resolve(host, &ip)) {
+        return -1;
+    }
+    if (!tcp_connect(ip, port)) {
+        return -1;
+    }
+    tcp_rx_len = 0;
+    tcp_rx_pos = 0;
+
+    br_ssl_client_init_full(&tls_client, &tls_x509,
+                            bordify_trust_anchors,
+                            bordify_trust_anchor_count);
+    br_ssl_engine_set_buffer(&tls_client.eng, tls_iobuf,
+                             sizeof(tls_iobuf), 1);
+    uint32_t now = rtc_unix_time();
+    if (now < 946684800u) {
+        now = 1767225600u;
+    }
+    br_x509_minimal_set_time(&tls_x509, now / 86400u + 719528u,
+                             (now % 86400u) / 60u);
+    uint8_t entropy[32];
+    tls_fill_entropy(entropy, sizeof(entropy));
+    br_ssl_engine_inject_entropy(&tls_client.eng, entropy, sizeof(entropy));
+    if (!br_ssl_client_reset(&tls_client, host, 0)) {
+        tls_set_error(br_ssl_engine_last_error(&tls_client.eng));
+        tcp.active = false;
+        return -1;
+    }
+    br_sslio_init(&tls_io, &tls_client.eng, tls_read_cb, NULLPTR,
+                  tls_write_cb, NULLPTR);
+
+    char host_header[192];
+    if (port == 443) {
+        kstrncpy(host_header, host, sizeof(host_header) - 1);
+        host_header[sizeof(host_header) - 1] = 0;
+    } else {
+        snprintf(host_header, sizeof(host_header), "%s:%u", host, port);
+    }
+    char request[640];
+    int request_len = snprintf(request, sizeof(request),
+                               "GET %s HTTP/1.0\r\n"
+                               "Host: %s\r\n"
+                               "User-Agent: Bordify/1.0\r\n"
+                               "Accept: text/html,text/plain\r\n"
+                               "Accept-Encoding: identity\r\n"
+                               "Connection: close\r\n\r\n",
+                               path, host_header);
+    if (request_len <= 0 || request_len >= (int)sizeof(request)) {
+        net_set_error("The request URL was too long");
+        tcp.active = false;
+        return -1;
+    }
+    if (br_sslio_write_all(&tls_io, request, (size_t)request_len) < 0 ||
+        br_sslio_flush(&tls_io) < 0) {
+        tls_set_error(br_ssl_engine_last_error(&tls_client.eng));
+        tcp.active = false;
+        return -1;
+    }
+
+    int total = 0;
+    while (total < TCP_RX_MAX - 1) {
+        int n = br_sslio_read(&tls_io, tls_rx + total,
+                              (size_t)(TCP_RX_MAX - 1 - total));
+        if (n < 0) {
+            unsigned err = br_ssl_engine_last_error(&tls_client.eng);
+            tls_rx[total] = 0;
+            if (!total || !http_complete(tls_rx, total)) {
+                tls_set_error(err);
+                tcp.active = false;
+                return -1;
+            }
+            break;
+        }
+        if (n == 0) {
+            break;
+        }
+        total += n;
+        tls_rx[total] = 0;
+        if (http_complete(tls_rx, total)) {
+            break;
+        }
+    }
+    tls_rx[total] = 0;
+    if (total <= 0) {
+        tls_set_error(br_ssl_engine_last_error(&tls_client.eng));
+        tcp.active = false;
+        return -1;
+    }
+    int status = 0;
+    int result = http_extract(tls_rx, total, out, max_out,
+                              location, location_size, &status);
+    kprintf("[net] HTTPS %d, %d response bytes\n", status, total);
+    if (status_out) {
+        *status_out = status;
+    }
+    br_sslio_close(&tls_io);
+    tcp.active = false;
+    return result;
+}
+
 void net_init(void) {
     net_up = false;
     net_error[0] = 0;
@@ -1141,6 +1489,7 @@ int net_http_get(const char *host, uint16_t port, const char *path,
     if (location && location_size) {
         location[0] = 0;
     }
+    net_error[0] = 0;
     uint32_t ip;
     if (!net_dns_resolve(host, &ip)) {
         return -1;
@@ -1148,6 +1497,8 @@ int net_http_get(const char *host, uint16_t port, const char *path,
     if (!tcp_connect(ip, port)) {
         return -1;
     }
+    tcp_rx_len = 0;
+    tcp_rx_pos = 0;
 
     char host_header[192];
     if (port == 80) {

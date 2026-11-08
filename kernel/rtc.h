@@ -14,6 +14,7 @@ typedef struct {
 } rtc_time_t;
 
 void rtc_read(rtc_time_t *out);
+uint32_t rtc_unix_time(void);
 void rtc_format_time(char *out, size_t size);
 void rtc_format_date(char *out, size_t size);
 

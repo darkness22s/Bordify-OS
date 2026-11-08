@@ -2,7 +2,7 @@
 <head><title>Bordify Web</title></head>
 <body>
 <h1>Bordify Web</h1>
-<p>A small, native HTML reader for pages stored on the Bordify disk and plain HTTP pages on the network.</p>
+<p>A small, native HTML reader for pages stored on the Bordify disk and HTTP or HTTPS pages on the network.</p>
 <p>No host browser is involved. The text below is rendered by the kernel from a real file in WEB/HOME.HTM.</p>
 <hr>
 <h2>Pages</h2>
@@ -12,10 +12,10 @@
 </ul>
 <h2>On the network</h2>
 <ul>
-<li><a href="http://example.com/">Example Domain</a></li>
-<li><a href="http://info.cern.ch/">The first web page</a></li>
+<li><a href="https://example.com/">Example Domain (HTTPS)</a></li>
+<li><a href="https://info.cern.ch/">The first web page (HTTPS)</a></li>
 </ul>
-<p>Plain HTTP works through the emulated Intel e1000 adapter. HTTPS is not supported in this build.</p>
+<p>HTTP and HTTPS pages load through the emulated Intel e1000 adapter. HTTPS connections use TLS 1.2 and the installed root certificate authorities.</p>
 <h2>Local files</h2>
 <p>Open Files and read WELCOME.TXT, NOTES.TXT or DOCS/README.TXT.</p>
 <hr>

@@ -8,3 +8,4 @@ dist-ci/
 *.qcow2
 *.iso
 *.xz
+/.sparky/

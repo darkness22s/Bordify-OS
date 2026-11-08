@@ -540,23 +540,28 @@ static bool web_scheme(const char *url, const char *scheme) {
     return true;
 }
 
-static bool web_make_url(const char *host, uint16_t port, const char *path,
-                         char *out, size_t out_size) {
+static bool web_make_url(bool secure, const char *host, uint16_t port,
+                         const char *path, char *out, size_t out_size) {
+    const char *scheme = secure ? "https" : "http";
+    uint16_t default_port = secure ? 443 : 80;
     int n;
-    if (port == 80) {
-        n = snprintf(out, out_size, "http://%s%s", host, path);
+    if (port == default_port) {
+        n = snprintf(out, out_size, "%s://%s%s", scheme, host, path);
     } else {
-        n = snprintf(out, out_size, "http://%s:%u%s", host, port, path);
+        n = snprintf(out, out_size, "%s://%s:%u%s", scheme, host, port, path);
     }
     return n > 0 && (size_t)n < out_size;
 }
 
-static bool web_parse_http_url(const char *url, char *host, size_t host_size,
-                               uint16_t *port, char *path, size_t path_size) {
-    if (!web_scheme(url, "http://")) {
+static bool web_parse_url(const char *url, char *host, size_t host_size,
+                          uint16_t *port, char *path, size_t path_size,
+                          bool *secure) {
+    bool is_https = web_scheme(url, "https://");
+    if (!is_https && !web_scheme(url, "http://")) {
         return false;
     }
-    const char *p = url + 7;
+    const char *p = url + (is_https ? 8 : 7);
+    *secure = is_https;
     const char *host_start = p;
     while (*p && *p != ':' && *p != '/' && *p != '?' && *p != '#') {
         p++;
@@ -567,7 +572,7 @@ static bool web_parse_http_url(const char *url, char *host, size_t host_size,
     }
     kmemcpy(host, host_start, host_len);
     host[host_len] = 0;
-    *port = 80;
+    *port = is_https ? 443 : 80;
     if (*p == ':') {
         p++;
         uint32_t value = 0;
@@ -618,19 +623,21 @@ static bool web_resolve_location(const char *base, const char *location,
         kstrcpy(out, location);
         return true;
     }
-    if (location[0] == '/' && location[1] == '/') {
-        int n = snprintf(out, out_size, "http:%s", location);
-        return n > 0 && (size_t)n < out_size;
-    }
     char host[192];
     uint16_t port;
+    bool secure;
     char base_path[WEB_URL_SIZE];
-    if (!web_parse_http_url(base, host, sizeof(host), &port,
-                           base_path, sizeof(base_path))) {
+    if (!web_parse_url(base, host, sizeof(host), &port,
+                       base_path, sizeof(base_path), &secure)) {
         return false;
     }
+    if (location[0] == '/' && location[1] == '/') {
+        int n = snprintf(out, out_size, "%s:%s",
+                         secure ? "https" : "http", location);
+        return n > 0 && (size_t)n < out_size;
+    }
     if (location[0] == '/') {
-        return web_make_url(host, port, location, out, out_size);
+        return web_make_url(secure, host, port, location, out, out_size);
     }
 
     char target[WEB_URL_SIZE];
@@ -656,10 +663,10 @@ static bool web_resolve_location(const char *base, const char *location,
         kmemcpy(target, base_path, dir_len);
         kmemcpy(target + dir_len, location, loc_len + 1);
     }
-    return web_make_url(host, port, target, out, out_size);
+    return web_make_url(secure, host, port, target, out, out_size);
 }
 
-static void web_fetch_http(web_state_t *ws, const char *url) {
+static void web_fetch_page(web_state_t *ws, const char *url) {
     if (!net_ready()) {
         set_error_page(ws, "No network adapter",
                        "Bordify could not find an Intel e1000 adapter. "
@@ -671,26 +678,24 @@ static void web_fetch_http(web_state_t *ws, const char *url) {
     kstrncpy(current, url, sizeof(current) - 1);
     current[sizeof(current) - 1] = 0;
     for (int redirect = 0; redirect < 5; redirect++) {
-        if (web_scheme(current, "https://")) {
-            set_error_page(ws, "TLS is not available",
-                           "That page redirected to HTTPS, which this build cannot load. "
-                           "Try another plain HTTP address.");
-            return;
-        }
         char host[192];
         uint16_t port;
+        bool secure;
         char path[WEB_URL_SIZE];
-        if (!web_parse_http_url(current, host, sizeof(host), &port,
-                                path, sizeof(path))) {
+        if (!web_parse_url(current, host, sizeof(host), &port,
+                           path, sizeof(path), &secure)) {
             set_error_page(ws, "Invalid web address",
-                           "Use an address such as http://example.com/.");
+                           "Use an address such as https://example.com/.");
             return;
         }
         char location[WEB_URL_SIZE];
         location[0] = 0;
         int status = 0;
-        int bytes = net_http_get(host, port, path, ws->page, WEB_PAGE_SIZE,
-                                 location, sizeof(location), &status);
+        int bytes = secure
+            ? net_https_get(host, port, path, ws->page, WEB_PAGE_SIZE,
+                            location, sizeof(location), &status)
+            : net_http_get(host, port, path, ws->page, WEB_PAGE_SIZE,
+                           location, sizeof(location), &status);
         if (bytes < 0) {
             set_error_page(ws, "Could not load page", net_last_error());
             return;
@@ -734,13 +739,13 @@ static void web_navigate(web_state_t *ws, const char *input, bool record_history
     if (!url[0]) {
         kstrcpy(url, "bordify://home");
     }
-    if (!kstrchr(url, ':') && kstrchr(url, '.')) {
+    if (url[0] != '/' && !kstrstr(url, "://")) {
         char temp[WEB_URL_SIZE];
-        snprintf(temp, sizeof(temp), "http://%s", url);
-        kstrcpy(url, temp);
-    } else if (!kstrchr(url, ':') && url[0] != '/') {
-        char temp[WEB_URL_SIZE];
-        snprintf(temp, sizeof(temp), "bordify://%s", url);
+        if (kstrchr(url, '.') || kstrchr(url, ':')) {
+            snprintf(temp, sizeof(temp), "https://%s", url);
+        } else {
+            snprintf(temp, sizeof(temp), "bordify://%s", url);
+        }
         kstrcpy(url, temp);
     }
 
@@ -766,15 +771,11 @@ static void web_navigate(web_state_t *ws, const char *input, bool record_history
                 ws->page_length = bytes;
             }
         }
-    } else if (web_scheme(url, "http://")) {
-        web_fetch_http(ws, url);
-    } else if (web_scheme(url, "https://")) {
-        set_error_page(ws, "TLS is not available",
-                       "Bordify Web can display local pages and plain HTTP pages, "
-                       "but this build does not include a TLS stack.");
+    } else if (web_scheme(url, "http://") || web_scheme(url, "https://")) {
+        web_fetch_page(ws, url);
     } else {
         set_error_page(ws, "Unsupported address",
-                       "Use bordify://home, bordify://guide or an http:// address.");
+                       "Use bordify://home, bordify://guide or an https:// address.");
     }
 
     if (record_history) {

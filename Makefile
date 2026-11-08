@@ -3,8 +3,13 @@ PYTHON ?= python3
 
 CFLAGS := -m32 -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
           -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-builtin \
-          -fno-common -mno-sse -mno-sse2 -mno-mmx -mno-3dnow -fno-asynchronous-unwind-tables \
-          -fno-unwind-tables -Iinclude -Ikernel
+          -fno-common -fno-strict-aliasing -mno-sse -mno-sse2 -mno-mmx -mno-3dnow \
+          -fno-asynchronous-unwind-tables -fno-unwind-tables -Iinclude -Ikernel \
+          -Ithird_party/bearssl/inc
+BEARSSL_CFLAGS := -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 \
+                  -DBR_USE_WIN32_RAND=0 -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_TIME=0 \
+                  -DBR_RDRAND=0 -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_POWER8=0 \
+                  -DBR_64=0 -DBR_INT128=0 -DBR_UMUL128=0
 ASFLAGS := -m32
 LDFLAGS := -m32 -no-pie -nostdlib -Wl,--build-id=none -T boot/linker.ld
 
@@ -12,9 +17,11 @@ BUILD := build
 KERNEL := $(BUILD)/bordify.elf
 CFILES := $(wildcard kernel/*.c)
 AFILES := boot/boot.S kernel/isr.S
+BEARSSL_SRCS := $(wildcard third_party/bearssl/src/*.c third_party/bearssl/src/*/*.c)
+BEARSSL_OFILES := $(patsubst third_party/bearssl/src/%.c,$(BUILD)/bearssl/%.o,$(BEARSSL_SRCS))
 OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
-          $(BUILD)/font.o
+          $(BUILD)/font.o $(BEARSSL_OFILES)
 
 all: $(KERNEL)
 
@@ -36,6 +43,10 @@ $(BUILD)/boot/%.o: boot/%.S
 $(BUILD)/kernel/%.o: kernel/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(BUILD)/bearssl/%.o: third_party/bearssl/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(BEARSSL_CFLAGS) -c $< -o $@
 
 $(KERNEL): $(OFILES) boot/linker.ld
 	@mkdir -p $(BUILD)
