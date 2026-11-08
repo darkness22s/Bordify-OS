@@ -326,6 +326,14 @@ static void files_open_selected(void) {
         return;
     }
     if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "WINIO.EXE") == 0) {
+        int code=process_run_win32_pe("APPS","WINIO.EXE");
+        set_status(code == 0 ? "Win32 disk file roundtrip passed" :
+                               "Win32 file compatibility test failed");
+        files_refresh();
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
         kstricmp(entry->name, "ARMHELLO.MCH") == 0) {
         int code = a64_demo_run();
         set_status(code == 0 ? "ARM64 Mach-O demo interpreted successfully" :
