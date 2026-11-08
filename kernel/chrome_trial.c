@@ -107,11 +107,14 @@ static void try_other_windows(uint16_t parent, const char *filename,
     }
     exec_info_t info;
     if (!exec_inspect(first,sizeof(first),&info) || !info.valid) {
-        kprintf("[winapps] %s: PE format rejected\n",label);
-        return;
+        /* The 512-byte prefix may not contain all PE section headers.
+         * Report that limitation, but still invoke the real PE32 loader;
+         * the authoritative loader checks the complete file bounds. */
+        kprintf("[winapps] %s: 512-byte PE preflight inconclusive\n",label);
+    } else {
+        kprintf("[winapps] %s: detected %s / %s\n",
+                label,exec_format_name(info.format),exec_arch_name(info.arch));
     }
-    kprintf("[winapps] %s: detected %s / %s\n",
-            label,exec_format_name(info.format),exec_arch_name(info.arch));
     int rc=process_run_win32_pe("APPS",filename);
     kprintf("[winapps] %s: native Win32 attempt returned %d\n",label,rc);
 }
