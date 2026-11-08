@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32, restricted Windows PE32 console execution, read-only uncompressed UDIF disk-sector access, and a tiny ARM64 Mach-O interpreter all verified in QEMU**. Full Windows x64 installers, DMG mount/install, Apple Silicon macOS apps and Darwin/Cocoa applications are **NOT** supported.
+Status: **native ELF32, restricted Windows PE32 console execution, read-only raw/zero/zlib UDIF disk-sector access, and a tiny ARM64 Mach-O interpreter all verified in QEMU**. Full Windows x64 installers, DMG mount/install, Apple Silicon macOS apps and Darwin/Cocoa applications are **NOT** supported.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -10,7 +10,7 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 | Requested feature | Verified now | Not yet working |
 | --- | --- | --- |
 | Windows x64 EXE installers | Windows **x86 PE32** demo calls three kernel32 functions | PE32+ x64 CPU execution, 64-bit DLLs, registry, installation APIs and real setup engines |
-| macOS DMG mounting and installation | DMG footer + first XML blkx table, raw/zero sector reads from disk | Compressed images, whole-image filesystem mount, APFS/HFS+, PKG/.app installation |
+| macOS DMG mounting and installation | DMG footer + XML blkx maps; raw, zero and bounded zlib-compressed sectors from FAT16 disk | Other compression codecs, whole-image mount, APFS/HFS+, PKG/.app installation |
 | Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
 | Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
 | macOS Darwin/Cocoa runtime | Mach-O metadata recognition and synthetic ARM64 instruction demo | dyld, libSystem, Objective-C/Swift, Foundation, Cocoa/AppKit and macOS services |
@@ -40,12 +40,16 @@ Notes: executable/container prefix inspection examines only the bytes File Manag
 
 ### Stage 0.5 — Installer container support (partial read-only UDIF sector access)
 
-- **DMG:** The experimental UDIF reader now decodes the first XML `blkx`/base64 `mish` block map, validates raw and zero-fill chunk bounds, reads actual 512-byte sectors from a FAT16-hosted DMG **without extracting the whole image**, and explicitly refuses compressed blocks. QEMU verifies `APPS/DMGDEMO.DMG` end-to-end. **Still required:** multiple partitions/maps, zlib/LZFSE/bzip2 and other codecs, checksum validation, block-device abstraction, and HFS+/APFS filesystem mounting, plus installer workflows. A DMG is a virtual disk image, not necessarily an installer.
+- **DMG:** The experimental UDIF reader now decodes the first XML `blkx`/base64 `mish` block map, validates raw, zero-fill and zlib chunk bounds, reads actual 512-byte sectors from a FAT16-hosted DMG **without extracting the whole image**, including bounded zlib-compressed chunks with Adler-32 validation; other compression algorithms are explicitly unsupported. QEMU verifies `APPS/DMGDEMO.DMG` end-to-end. **Still required:** multiple partitions/maps, LZFSE/bzip2/other codecs, UDIF checksum validation, a reusable block-device abstraction, and HFS+/APFS filesystem mounting, plus installer workflows. A DMG is a virtual disk image, not necessarily an installer.
 - **macOS PKG:** Implement a sandboxed XAR reader, compression and package manifest parsing. Installation scripts and dependency management must be handled explicitly, with clear trust/permission policy.
 - **macOS APP:** Support long filenames, symlinks, bundle `Info.plist`, architecture selection and code-signature validation policy before passing executable to an isolated Mach-O process runtime.
 - **Windows x64 EXE installer:** Beyond PE32+ recognition, needs long-mode/64-bit processes, 64-bit Windows APIs, dynamic DLL loading, registry semantics, installer file/shortcut operations and a target app runtime. Self-extractors such as NSIS/Inno/InstallShield are different formats layered atop PE; compatibility must be tested individually.
 - **MSI:** OLE/CFB signature alone is not proof of a Windows Installer database; use the MSI directory/stream structures to validate and install under a Windows Installer-compatible runtime.
 - **Hardware:** Plan a x86-64 kernel and 64-bit boot path while keeping the current 32-bit boot image working until a tested replacement exists.
+
+### Stage 0.6 — Bounded zlib-compressed DMG reads (verified)
+
+A freestanding, checked RFC 1950/1951 zlib/DEFLATE decoder supports stored, fixed-Huffman and dynamic-Huffman streams with Adler-32 validation and a strict output bound. The UDIF sector reader now recognizes blkx compression type `0x80000005` (zlib), stages at most 1 MiB per chunk, validates exact decompressed sector size and allows read-only sector access. Host-side tests compare against the system zlib encoder and exercise corruption, truncated streams and output overruns; a generated `APPS/ZDMG.DMG` contains a real compressed data fork and its sector contents are verified during a QEMU boot. This does **not** yet mount a filesystem or install an application, and only supports zlib chunks within the size limit. A DMG may contain non-zlib chunks, APFS/HFS+ filesystem data, or no installer at all.
 
 ### Stage 1 — Native process infrastructure (first executable milestone)
 
