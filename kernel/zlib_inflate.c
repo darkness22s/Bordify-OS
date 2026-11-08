@@ -16,6 +16,7 @@ typedef struct {
 typedef struct {
     uint16_t count[16];       /* number of symbols for each code length */
     uint16_t symbols[288];    /* canonical code order, by length */
+    uint16_t symbol_count;  /* count of initialized nonzero symbols */
 } huff_t;
 
 static bool read_bits(bits_t *b, unsigned n, uint32_t *value) {
@@ -34,6 +35,8 @@ static bool read_bits(bits_t *b, unsigned n, uint32_t *value) {
 static bool make_tree(const uint8_t *lengths, unsigned n, huff_t *tree) {
     uint16_t next[16] = {0};
     for (unsigned i = 0; i < 16; ++i) tree->count[i] = 0;
+    tree->symbol_count = 0;
+    for (unsigned i=0;i<288u;++i) tree->symbols[i]=0;
     if (n > 288) return false;
     for (unsigned symbol = 0; symbol < n; ++symbol) {
         if (lengths[symbol] > 15) return false;
@@ -46,6 +49,8 @@ static bool make_tree(const uint8_t *lengths, unsigned n, huff_t *tree) {
         remaining = (remaining << 1) - tree->count[len];
         if (remaining < 0) return false;
     }
+    /* Zero-length symbols are absent, NOT part of the canonical offsets. */
+    tree->symbol_count = (uint16_t)(n - tree->count[0]);
     next[1] = 0;
     for (unsigned len = 2; len <= 15; ++len)
         next[len] = (uint16_t)(next[len - 1] + tree->count[len - 1]);
@@ -54,7 +59,7 @@ static bool make_tree(const uint8_t *lengths, unsigned n, huff_t *tree) {
         unsigned len = lengths[symbol];
         if (len != 0) {
             uint16_t pos = next[len]++;
-            if (pos >= n) return false;
+            if (pos >= tree->symbol_count || pos >= 288u) return false;
             tree->symbols[pos] = (uint16_t)symbol;
         }
     }
@@ -70,7 +75,7 @@ static bool decode(bits_t *b, const huff_t *tree, uint16_t *symbol) {
         code |= bit;
         unsigned count = tree->count[len];
         if (code >= first && code - first < count) {
-            if (index + code - first >= 288) return false;
+            if (index + code - first >= tree->symbol_count) return false;
             *symbol = tree->symbols[index + code - first];
             return true;
         }
