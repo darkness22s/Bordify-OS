@@ -38,6 +38,9 @@ int main(void) {
     assert(r.cocoa_application_started && r.cocoa_application_terminated);
     static const char expected[]=
         "BORDIFY COCOA: NSString NSWindow NSApplication lifecycle verified\n";
+    /* Review regression: the exact NSString literal is 66 bytes, not
+     * 67; emitting or comparing 67 would include the trailing NUL. */
+    assert(sizeof(expected)-1==66u);
     assert(message_len==sizeof(expected)-1);
     assert(!memcmp(message,expected,sizeof(expected)-1));
 
