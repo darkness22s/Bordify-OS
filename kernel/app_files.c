@@ -382,6 +382,13 @@ static void files_open_selected(void) {
                                "Installed Mach-O demo failed");
         return;
     }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "ARMWORK.MCH") == 0) {
+        int code=compat_arm64_workload_run();
+        set_status(code == 0 ? "Compiled ARM64 app exited successfully" :
+                               "Compiled ARM64 app failed; inspect serial log");
+        return;
+    }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
     if (bytes < 0) {
         set_status("Could not read file");
