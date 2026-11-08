@@ -78,7 +78,21 @@ jobs:
           fi
           set -e
           echo "[winapps] archive list=$list_rc extract=$extraction_rc"
-          candidate=$(find build/windows/extracted -type f -iname chrome.exe -print -quit 2>/dev/null)
+          find build/windows/extracted -type f | head -n 30 || true
+          # Chrome installers may contain chrome.7z nested inside the EXE.
+          nested=$(find build/windows/extracted -type f \( -iname '*.7z' -o -iname '*.zip' \) -print -quit 2>/dev/null)
+          if [ -n "$nested" ]; then
+            echo "[winapps] attempting nested Chrome archive: $nested"
+            mkdir -p build/windows/nested
+            set +e
+            timeout 80s 7z x -y -o"build/windows/nested" "$nested" \
+              > build/windows/nested-extraction.txt 2>&1
+            nested_rc=$?
+            set -e
+            echo "[winapps] nested 7z extraction status=$nested_rc"
+          fi
+          candidate=$(find build/windows/extracted build/windows/nested \
+            -type f -iname chrome.exe -print -quit 2>/dev/null)
           if [ -n "$candidate" ]; then
             cp "$candidate" build/windows/chrome-binary.exe
             python3 tools/windows_pe_probe.py build/windows/chrome-binary.exe \
@@ -124,6 +138,7 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then exit "$rc"; fi
+          cat build/windows-probe-serial.log
           grep -F "[chrome-win] native PE32 launch attempt rejected" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: real file size=" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: native Win32 attempt returned" build/windows-probe-serial.log
@@ -149,6 +164,7 @@ jobs:
             build/windows-web-setup-dependencies.txt
             build/windows/archive-list.txt
             build/windows/archive-extraction.txt
+            build/windows/nested-extraction.txt
             build/windows/extracted-chrome-dependencies.json
             build/windows/extracted-chrome-report.txt
             build/windows-probe-serial.log
