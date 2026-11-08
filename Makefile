@@ -54,7 +54,17 @@ $(KERNEL): $(OFILES) boot/linker.ld
 	@mkdir -p $(BUILD)
 	$(CC) $(LDFLAGS) -o $@ $(OFILES) -lgcc
 
+
+# Build host-side parser tests without -m32 or the freestanding kernel flags.
+HOST_CC ?= cc
+$(BUILD)/tests/exec_inspect_test: tests/exec_inspect_test.c kernel/exec_inspect.c kernel/exec_inspect.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/exec_inspect_test.c kernel/exec_inspect.c -o $@
+
+test: $(BUILD)/tests/exec_inspect_test
+	./$(BUILD)/tests/exec_inspect_test
+
 clean:
 	rm -rf $(BUILD) dist
 
-.PHONY: all clean
+.PHONY: all clean test
