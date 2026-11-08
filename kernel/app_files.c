@@ -215,6 +215,15 @@ static void files_open_selected(void) {
                                "Native app failed; inspect serial log");
         return;
     }
+    /* Only the audited Win32 demonstration is executable so far;
+       arbitrary EXEs stay inspection-only until process limits improve. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "WINHELLO.EXE") == 0) {
+        int code = process_run_win32_pe("APPS", entry->name);
+        set_status(code == 0 ? "Win32 console demo exited successfully" :
+                               "Win32 demo failed; inspect serial log");
+        return;
+    }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
     if (bytes < 0) {
         set_status("Could not read file");
