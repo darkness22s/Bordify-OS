@@ -66,6 +66,7 @@ def probe(path, max_bytes=1<<30):
     is64=(magic==0x20b)
     entry=u32(content,opt+16)
     image_size=u32(content,opt+56)
+    image_base=u64(content,opt+24) if is64 else u32(content,opt+28)
     header_size=u32(content,opt+60)
     subsystem=u16(content,opt+68)
     dirs=opt+(112 if is64 else 96)
@@ -130,7 +131,7 @@ def probe(path, max_bytes=1<<30):
         "pe": "PE32+ AMD64" if is64 and machine==0x8664 else
               "PE32 x86" if not is64 and machine==0x14c else
               f"PE format magic=0x{magic:x}, machine=0x{machine:x}",
-        "entry_rva":entry,"image_bytes":image_size,
+        "entry_rva":entry,"image_bytes":image_size,"image_base":f"0x{image_base:x}",
         "headers_bytes":header_size,"subsystem":subsystem,
         "section_count":section_count,"sections":sections,
         "overlay_bytes":max(0,size-end_on_disk),
@@ -138,8 +139,8 @@ def probe(path, max_bytes=1<<30):
         "missing_imports":unknown[:250],"missing_imports_count":len(unknown),
         "imports_truncated":imports_truncated,
         "fits_current_pe32_image":(
-            not is64 and size<=65536 and
-            image_size<=192*1024 and subsystem==3 and
+            not is64 and size<=2*1024*1024 and
+            image_size<=1536*1024 and subsystem==3 and
             len(unknown)==0 and not imports_truncated),
         "has_pe_sections_within_64k":end_on_disk<=65536,
         "would_need_dll_loader":any(x!="kernel32.dll" for x in dlls),
@@ -164,7 +165,7 @@ def main():
             continue
         print(f"[winprobe] {result['filename']}: {result['pe']}, "
               f"file={result['bytes']}, image={result['image_bytes']}, "
-              f"overlay={result['overlay_bytes']}, "
+              f"overlay={result['overlay_bytes']}, base={result['image_base']}, "
               f"imports={result['total_imports']} ({len(result['dlls'])} DLLs), "
               f"unsupported={result['missing_imports_count']}, "
               f"PE32-supported={result['fits_current_pe32_image']}")
