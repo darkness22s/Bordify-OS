@@ -48,7 +48,8 @@ Prebuilt images are attached to the [latest release](https://github.com/darkness
 - `SHA256SUMS` - checksums
 
 Every push to `main` also produces the same files as the
-`Bordify-OS-images` artifact in the **Actions** tab.
+`Bordify-OS-images` artifact in the **Actions** tab. Disk images are 1 GiB by
+default; QEMU's `-m 128` setting below controls RAM separately from disk capacity.
 
 Run the raw image with QEMU:
 

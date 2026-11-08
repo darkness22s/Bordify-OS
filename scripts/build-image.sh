@@ -41,7 +41,7 @@ trap cleanup EXIT
 mkdir -p "$DIST"
 rm -f "$IMG" "$VHD" "$VHD.xz" "$IMG.xz" "$DIST/SHA256SUMS"
 
-truncate -s 128M "$IMG"
+truncate -s 1G "$IMG"
 "${SUDO[@]}" parted --script "$IMG" \
     mklabel msdos \
     mkpart primary fat16 1MiB 100% \
