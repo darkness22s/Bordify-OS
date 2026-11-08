@@ -21,6 +21,7 @@ static void fixture(uint8_t h[512]) {
     be32set(h + 40, 4096); /* allocation block */
     be32set(h + 44, 8); /* blocks -> 64 sectors */
     be32set(h + 48, 3); /* free */
+    be32set(h + 276, 8192); /* catalog logical size */
     be32set(h + 284, 2); /* catalog total blocks */
     be32set(h + 288, 2); /* first catalog extent starts */
     be32set(h + 292, 2); /* catalog extent occupies two blocks */
@@ -52,6 +53,39 @@ int main(void) {
     assert(!hfsplus_probe_header(h, 512, 64, &info));
     fixture(h); h[0] = 'X';
     assert(!hfsplus_probe_header(h, 512, 64, &info));
-    puts("HFS+ / HFSX read-only volume header tests: PASS");
+
+    fixture(h);
+    assert(hfsplus_probe_header(h, 512, 64, &info));
+    uint64_t start = UINT64_MAX;
+    assert(hfsplus_catalog_first_sector(&info, 64, &start) && start == 16);
+    assert(!hfsplus_catalog_first_sector(&info, 17, &start));
+    assert(!hfsplus_catalog_first_sector(NULL, 64, &start));
+    uint8_t node[512] = {0};
+    node[8] = 1; /* kBTHeaderNode */
+    be16set(node + 10, 3);
+    be16set(node + 14, 1); /* tree depth */
+    be32set(node + 16, 1); /* root node */
+    be32set(node + 20, 1); /* leaf records */
+    be32set(node + 24, 1); /* first leaf */
+    be32set(node + 28, 1); /* last leaf */
+    be16set(node + 32, 512);
+    be32set(node + 36, 16); /* total nodes */
+    be32set(node + 40, 12); /* free nodes */
+    be16set(node + 510, 14);
+    be16set(node + 508, 120);
+    be16set(node + 506, 248);
+    be16set(node + 504, 256);
+    hfsplus_catalog_info_t catalog;
+    assert(hfsplus_catalog_probe(node, 512, 8192, &catalog));
+    assert(catalog.root_node == 1 && catalog.total_nodes == 16);
+    assert(!hfsplus_catalog_probe(node, 511, 8192, &catalog));
+    assert(!hfsplus_catalog_probe(node, 512, 4096, &catalog));
+    node[8] = 0; assert(!hfsplus_catalog_probe(node, 512, 8192, &catalog)); node[8] = 1;
+    be32set(node + 16, 16);
+    assert(!hfsplus_catalog_probe(node, 512, 8192, &catalog));
+    be32set(node + 16, 1);
+    be16set(node + 510, 0);
+    assert(!hfsplus_catalog_probe(node, 512, 8192, &catalog));
+    puts("HFS+ / HFSX volume and bounded catalog header tests: PASS");
     return 0;
 }
