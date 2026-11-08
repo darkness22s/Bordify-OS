@@ -9,6 +9,7 @@
 #include "string.h"
 #include "printf.h"
 #include "exec_inspect.h"
+#include "package_inspect.h"
 
 #define FILES_MAX_ENTRIES 128
 #define FILES_VIEWER_SIZE 14336
@@ -211,26 +212,81 @@ static void files_open_selected(void) {
     }
     fs.viewer_text[bytes] = 0;
     /*
-     * Inspect before treating a binary payload as a NUL-terminated string.
-     * Foreign executables are deliberately NOT run as kernel code.
-     * With FAT16 8.3 filenames, bundle directories are not supported yet.
+     * Installer/format inspection only. Never jump into untrusted code or
+     * accidentally render raw installer data as a string.
+     *
+     * UDIF has its header at EOF; a 512-byte ranged FAT16 read avoids
+     * bringing a potentially very large disk image into kernel memory.
      */
-    exec_info_t executable;
-    if (exec_inspect(fs.viewer_text, (size_t)bytes, &executable)) {
+    package_info_t package;
+    size_t name_len = kstrlen(entry->name);
+    bool is_dmg = name_len >= 4 &&
+                  kstricmp(entry->name + name_len - 4, ".DMG") == 0;
+    bool identified = false;
+    if (is_dmg) {
+        uint8_t trailer[512];
+        int tail_bytes = entry->size >= 512 ?
+            fat16_read_range(fs.cluster, entry->name, entry->size - 512,
+                             trailer, sizeof(trailer)) : -1;
+        bool recognized = tail_bytes == 512 &&
+            package_inspect_dmg_trailer(trailer, sizeof(trailer),
+                                        entry->size, &package);
+        if (recognized) {
+            snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                     "Apple disk image: %s\n"
+                     "Type: %s\n"
+                     "Trailer: %s\n"
+                     "Image size: %u bytes\n"
+                     "Virtual disk: %u MiB\n\n"
+                     "%s\n\n"
+                     "Bordify cannot mount or install DMG images yet.",
+                     entry->display, package_format_name(package.format),
+                     package.valid ? "Recognized" : "Malformed",
+                     entry->size,
+                     (uint32_t)(package.virtual_disk_bytes / (1024u * 1024u)),
+                     package_compatibility_note(package.format));
+        } else {
+            snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                     "Cannot open %s as a DMG.\n"
+                     "A complete UDIF image must have a valid 512-byte\n"
+                     "koly trailer at the end of the file.\n\n"
+                     "The image may be truncated or use another format.",
+                     entry->display);
+        }
+        identified = true;
+    }
+    if (!identified && package_inspect_prefix(fs.viewer_text, (size_t)bytes,
+                                               entry->size, &package)) {
         snprintf(fs.viewer_text, sizeof(fs.viewer_text),
-                 "Executable file: %s\n"
-                 "Format: %s\n"
-                 "CPU: %s\n"
+                 "Installer/container: %s\n"
+                 "Type: %s\n"
                  "Header: %s\n"
                  "File size: %u bytes\n\n"
                  "%s\n\n"
-                 "Bordify does not execute foreign binaries yet.\n"
-                 "This is a safe file-format inspection, not an app launcher.",
-                 entry->display,
-                 exec_format_name(executable.format),
-                 exec_arch_name(executable.arch),
-                 executable.valid ? "Recognized" : "Invalid or truncated",
-                 entry->size, exec_compatibility_note(&executable));
+                 "Bordify can inspect this container but cannot install it yet.",
+                 entry->display, package_format_name(package.format),
+                 package.valid ? "Recognized" : "Invalid or incomplete",
+                 entry->size, package_compatibility_note(package.format));
+        identified = true;
+    }
+    if (!identified) {
+        exec_info_t executable;
+        if (exec_inspect(fs.viewer_text, (size_t)bytes, &executable)) {
+            snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                     "Executable file: %s\n"
+                     "Format: %s\n"
+                     "CPU: %s\n"
+                     "Header: %s\n"
+                     "File size: %u bytes\n\n"
+                     "%s\n\n"
+                     "Bordify does not execute foreign binaries yet.\n"
+                     "64-bit apps need a 64-bit process/runtime environment.",
+                     entry->display,
+                     exec_format_name(executable.format),
+                     exec_arch_name(executable.arch),
+                     executable.valid ? "Recognized" : "Invalid or truncated",
+                     entry->size, exec_compatibility_note(&executable));
+        }
     }
     kstrncpy(fs.viewer_name, entry->name, sizeof(fs.viewer_name) - 1);
     fs.viewer_name[sizeof(fs.viewer_name) - 1] = 0;
