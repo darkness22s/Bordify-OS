@@ -3,6 +3,7 @@ PYTHON ?= python3
 
 CFLAGS := -m32 -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
           -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-builtin \
+          -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
           -fno-common -fno-strict-aliasing -mno-sse -mno-sse2 -mno-mmx -mno-3dnow \
           -fno-asynchronous-unwind-tables -fno-unwind-tables -Iinclude \
           -Ithird_party/bearssl/inc -Ithird_party/bearssl/src
