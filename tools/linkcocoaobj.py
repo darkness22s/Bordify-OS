@@ -38,7 +38,7 @@ def main(source, destination):
         raise ValueError("expected Clang-assembled arm64 MH_OBJECT")
     count=u32(obj,16)
     size=u32(obj,20)
-    if not 1<=count<=12 or size>len(obj)-32:
+    if not 1<=count<=12 or size>len(obj)-32 or size<count*8:
         raise ValueError("bad load command list")
     off=32
     code=None
@@ -83,9 +83,12 @@ def main(source, destination):
                 ntype=obj[at+4]
                 symbols.append((get_name(strings,strx),ntype))
         off+=sz
+    if off!=32+size:
+        raise ValueError("load commands must exactly fill declared command region")
     if code is None or symbols is None or reloc_count<3:
         raise ValueError("missing code/symbols/relocations")
     seen=set()
+    seen_offsets=set()
     for i in range(reloc_count):
         where,info=struct.unpack_from("<iI",obj,reloc_off+i*8)
         symbol=info & 0x00ffffff
@@ -97,6 +100,9 @@ def main(source, destination):
            symbol>=len(symbols) or not pcrel or width!=2 or \
            not external or kind!=2: # ARM64_RELOC_BRANCH26
             raise ValueError("unsupported relocation")
+        if where in seen_offsets:
+            raise ValueError("overlapping ARM64 branch relocations")
+        seen_offsets.add(where)
         name,ntype=symbols[symbol]
         if name not in STUBS or (ntype & 0x0e)!=0:
             raise ValueError("unrecognized or defined imported symbol")
