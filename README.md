@@ -59,12 +59,28 @@ The experimental branch now also includes **two 64-bit compatibility proofs**:
 Both demos have host-side tests and QEMU boot checks. They can also be
 launched from the Files app's Apps directory.
 
+**Experimental x64 installer flow (audited fixture only):**
+Open `APPS/SETUP64.EXE` in Files. This genuine PE32+ AMD64 *test*
+installer runs through the bounded x64 interpreter, calls
+`CreateFileA`, `WriteFile` and `CloseHandle`, and installs its embedded
+PE32+ application to `APPS/APP64.EXE`. Bordify verifies the installed
+file and executes it; `APP64.EXE` can be relaunched in Files.
+GitHub Actions boots QEMU with a writable copy of the disk and then
+extracts the installed file for byte-for-byte verification.
+
+**This proves one end-to-end installer pathway, NOT compatibility with
+arbitrary Windows x64 setup EXEs** (MSI, Inno, NSIS, InstallShield,
+Visual C++ installers, DLL-based setup, graphical installers or real
+third-party apps). The installer is a generated regression fixture,
+not an external Windows application, and is restricted to one output
+filename. The kernel cannot safely run untrusted installers yet.
+
 The development branch also probes **HFS+/HFSX volume and catalog B-tree headers** inside
 compressed DMGs, including catalog-extent metadata, without mounting
 or reading an actual HFS+ filesystem. `APPS/HFSPLUS.DMG` is a synthetic
 header fixture (including a synthetic B-tree header), not a usable macOS installation image.
 
-This **does not** run real Windows x64 installers, arbitrary .exe files,
+This **does not** run general third-party Windows x64 installers or arbitrary .exe files,
 mount or install real macOS DMGs, execute general Apple Silicon applications,
 or implement full Darwin/Cocoa frameworks. Untrusted applications must not be launched by this
 early-stage kernel. [Details and compatibility gates](docs/application-compatibility.md).
