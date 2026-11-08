@@ -18,6 +18,7 @@
 #include "gui.h"
 #include "desktop.h"
 #include "icons.h"
+#include "process.h"
 
 extern uint8_t kernel_end;
 
@@ -71,6 +72,15 @@ void kernel_main(uint32_t mb_info_address) {
     } else {
         settings_defaults();
         kprintf("[kernel] no FAT16 disk, continuing with defaults\n");
+    }
+
+    process_init();
+    if (fat16_mounted()) {
+        /* Boot-time end-to-end test: runs from FAT16 at CPL3, not in kernel. */
+        int result = process_run_elf32("APPS", "HELLO.ELF");
+        if (result != 0) {
+            kprintf("[process] demo failed (status %d)\n", result);
+        }
     }
 
     gui_init();
