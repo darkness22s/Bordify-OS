@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL="$ROOT/build/bordify.elf"
 DEMO="$ROOT/build/apps/hello.elf"
+FAULT="$ROOT/build/apps/fault.elf"
 DIST="$ROOT/dist"
 IMG="$DIST/Bordify-OS.img"
 VHD="$DIST/Bordify-OS.vhd"
@@ -11,7 +12,7 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ]; then
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ]; then
     echo "Missing kernel or demo ELF32; run make first." >&2
     exit 1
 fi
@@ -67,6 +68,7 @@ MOUNTED=1
 "${SUDO[@]}" cp "$ROOT/boot/grub.cfg" "$MNT/boot/grub/grub.cfg"
 "${SUDO[@]}" cp "$KERNEL" "$MNT/boot/bordify.elf"
 "${SUDO[@]}" cp "$DEMO" "$MNT/APPS/HELLO.ELF"
+"${SUDO[@]}" cp "$FAULT" "$MNT/APPS/FAULT.ELF"
 "${SUDO[@]}" cp -r --no-preserve=mode,ownership,timestamps "$ROOT/assets/fs/." "$MNT/"
 
 "${SUDO[@]}" grub-install \
