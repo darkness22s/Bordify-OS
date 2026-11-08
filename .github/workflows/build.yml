@@ -53,6 +53,8 @@ jobs:
           grep -F "[process] paging on" build/qemu-serial.log
           grep -F "BORDIFY USERMODE: hello from an isolated ring-3 ELF32 app" build/qemu-serial.log
           grep -F "[process] ELF32 user program exited 0" build/qemu-serial.log
+          grep -F "[process] isolated user fault 14" build/qemu-serial.log
+          grep -F "[process] ELF32 user program exited -1" build/qemu-serial.log
           grep -F "[kernel] starting desktop" build/qemu-serial.log
           if grep -q "PANIC" build/qemu-serial.log; then
             echo "Kernel panic during boot smoke test"
