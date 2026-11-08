@@ -4,6 +4,7 @@
 .global isr\num
 isr\num:
     cli
+    pushl $0
     pushl $\num
     jmp isr_common
 .endm
@@ -74,6 +75,14 @@ IRQ_STUB 12, 44
 IRQ_STUB 13, 45
 IRQ_STUB 14, 46
 IRQ_STUB 15, 47
+
+/* User-level software interrupt: eax=number, ebx/ecx=arguments. */
+.global isr128
+isr128:
+    cli
+    pushl $0
+    pushl $128
+    jmp isr_common
 
 isr_common:
     pusha

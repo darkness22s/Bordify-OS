@@ -3,6 +3,21 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL="$ROOT/build/bordify.elf"
+DEMO="$ROOT/build/apps/hello.elf"
+FAULT="$ROOT/build/apps/fault.elf"
+WIN32="$ROOT/build/apps/winhello.exe"
+WINIO="$ROOT/build/apps/winio.exe"
+WIN64="$ROOT/build/apps/win64demo.exe"
+WINSETUP="$ROOT/build/apps/win64setup.exe"
+DARWIN="$ROOT/build/apps/darwin.mch"
+COCOA="$ROOT/build/apps/cocoa.mch"
+DMG="$ROOT/build/apps/dmgdemo.dmg"
+ZDMG="$ROOT/build/apps/zdmg.dmg"
+HFSPLUS="$ROOT/build/apps/hfsplus.dmg"
+MOUNTDMG="$ROOT/build/apps/mount.dmg"
+ARM="$ROOT/build/apps/armhello.mch"
+ARMWORK="$ROOT/build/apps/armwork.mch"
+ARMCALC="$ROOT/build/apps/armcalc.mch"
 DIST="$ROOT/dist"
 IMG="$DIST/Bordify-OS.img"
 VHD="$DIST/Bordify-OS.vhd"
@@ -10,8 +25,8 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ]; then
-    echo "Missing $KERNEL; run make first." >&2
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$WINIO" ] || [ ! -f "$WIN64" ] || [ ! -f "$WINSETUP" ] || [ ! -f "$DARWIN" ] || [ ! -f "$COCOA" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$HFSPLUS" ] || [ ! -f "$MOUNTDMG" ] || [ ! -f "$ARM" ] || [ ! -f "$ARMWORK" ] || [ ! -f "$ARMCALC" ]; then
+    echo "Missing kernel or demo executables; run make first." >&2
     exit 1
 fi
 for asset in WELCOME.TXT NOTES.TXT DOCS/README.TXT WEB/HOME.HTM WEB/GUIDE.HTM WEB/ABOUT.HTM SYSTEM/SETTINGS.CFG; do
@@ -62,9 +77,24 @@ fi
 "${SUDO[@]}" mount "${LOOP}p1" "$MNT"
 MOUNTED=1
 
-"${SUDO[@]}" mkdir -p "$MNT/boot/grub" "$MNT/WEB" "$MNT/DOCS" "$MNT/SYSTEM"
+"${SUDO[@]}" mkdir -p "$MNT/boot/grub" "$MNT/WEB" "$MNT/DOCS" "$MNT/SYSTEM" "$MNT/APPS"
 "${SUDO[@]}" cp "$ROOT/boot/grub.cfg" "$MNT/boot/grub/grub.cfg"
 "${SUDO[@]}" cp "$KERNEL" "$MNT/boot/bordify.elf"
+"${SUDO[@]}" cp "$DEMO" "$MNT/APPS/HELLO.ELF"
+"${SUDO[@]}" cp "$FAULT" "$MNT/APPS/FAULT.ELF"
+"${SUDO[@]}" cp "$WIN32" "$MNT/APPS/WINHELLO.EXE"
+"${SUDO[@]}" cp "$WINIO" "$MNT/APPS/WINIO.EXE"
+"${SUDO[@]}" cp "$WIN64" "$MNT/APPS/WIN64.EXE"
+"${SUDO[@]}" cp "$WINSETUP" "$MNT/APPS/SETUP64.EXE"
+"${SUDO[@]}" cp "$DARWIN" "$MNT/APPS/DARWIN.MCH"
+"${SUDO[@]}" cp "$COCOA" "$MNT/APPS/COCOA.MCH"
+"${SUDO[@]}" cp "$DMG" "$MNT/APPS/DMGDEMO.DMG"
+"${SUDO[@]}" cp "$ZDMG" "$MNT/APPS/ZDMG.DMG"
+"${SUDO[@]}" cp "$HFSPLUS" "$MNT/APPS/HFSPLUS.DMG"
+"${SUDO[@]}" cp "$MOUNTDMG" "$MNT/APPS/MOUNT.DMG"
+"${SUDO[@]}" cp "$ARM" "$MNT/APPS/ARMHELLO.MCH"
+"${SUDO[@]}" cp "$ARMWORK" "$MNT/APPS/ARMWORK.MCH"
+"${SUDO[@]}" cp "$ARMCALC" "$MNT/APPS/ARMCALC.MCH"
 "${SUDO[@]}" cp -r --no-preserve=mode,ownership,timestamps "$ROOT/assets/fs/." "$MNT/"
 
 "${SUDO[@]}" grub-install \

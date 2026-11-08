@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  pull_request:
+
+# Do not keep running expensive image builds for superseded PR commits.
+concurrency:
+  group: bordify-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -20,13 +26,83 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential gcc-multilib nasm python3-pil fonts-dejavu-core \
-            dosfstools mtools parted grub-pc-bin grub-common qemu-utils xz-utils
+            dosfstools mtools parted grub-pc-bin grub-common qemu-utils qemu-system-x86 xz-utils zlib1g-dev
 
-      - name: Compile kernel
+      - name: Test executable, PE32+, and ARM64 Darwin compatibility layers
+        run: make test
+
+      - name: Compile kernel and user process
         run: make -j"$(nproc)"
 
       - name: Assemble disk images
         run: sudo bash scripts/build-image.sh
+
+      - name: QEMU boot smoke test
+        run: |
+          set -o pipefail
+          mkdir -p build
+          sudo chmod a+r dist/Bordify-OS.img
+          cp --sparse=always dist/Bordify-OS.img build/win64-installer-smoke.img
+          set +e
+          timeout --signal=TERM 25s qemu-system-i386 \
+            -drive file=build/win64-installer-smoke.img,format=raw,if=ide \
+            -nic user,model=e1000 -m 128 -vga std -display none \
+            -serial file:build/qemu-serial.log -no-reboot -no-shutdown \
+            >build/qemu-output.log 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 124 ]; then
+            cat build/qemu-output.log
+            exit "$code"
+          fi
+          cat build/qemu-serial.log
+          grep -F "[dmg] read-only raw UDIF sector verified in QEMU" build/qemu-serial.log
+          grep -F "[dmg] zlib compressed UDIF sector verified in QEMU" build/qemu-serial.log
+          grep -F "[hfsplus] compressed DMG HFS+ volume and catalog header verified in QEMU" build/qemu-serial.log
+          grep -F "[dmg] zlib UDIF HFS+ read-only mount; found DARWIN.MCH (1024 bytes)" build/qemu-serial.log
+          grep -F "[dmg-install] extracted HFS+ file to APPS/DMGAPP.MCH (1024 bytes)" build/qemu-serial.log
+          grep -F "[dmg-install] extracted Mach-O ARM64 app launched; exit 0" build/qemu-serial.log
+          # Validate the installed macOS-format file was saved persistently.
+          mcopy -i "build/win64-installer-smoke.img@@1048576" "::APPS/DMGAPP.MCH" build/dmgapp-extracted.mch
+          cmp build/dmgapp-extracted.mch build/apps/darwin.mch
+          echo "Persistent compressed DMG/HFS+ extraction test: PASS"
+          grep -F "BORDIFY ARM64: interpreted Mach-O demo under x86 QEMU" build/qemu-serial.log
+          grep -F "[arm64] Mach-O interpreted safely; guest exited 0 after 7 steps" build/qemu-serial.log
+          grep -F "BORDIFY ARM64 EXTENDED: verified arithmetic branches and stack" build/qemu-serial.log
+          grep -F "[arm64] clang-assembled Mach-O arithmetic, branches and stack passed;" build/qemu-serial.log
+          grep -F "[arm64] clang-compiled freestanding C Mach-O checksum passed;" build/qemu-serial.log
+          grep -F "[process] paging on" build/qemu-serial.log
+          grep -F "BORDIFY USERMODE: hello from an isolated ring-3 ELF32 app" build/qemu-serial.log
+          grep -F "[process] ELF32 user program exited 0" build/qemu-serial.log
+          grep -F "[process] isolated user fault 14" build/qemu-serial.log
+          grep -F "[process] ELF32 user program exited -1" build/qemu-serial.log
+          grep -F "[win32] launched PE32 console in ring 3 with 3 kernel32 imports" build/qemu-serial.log
+          grep -F "BORDIFY WIN32: WriteFile through kernel32 compatibility layer" build/qemu-serial.log
+          grep -F "[win32] PE32 process exited 0" build/qemu-serial.log
+          grep -F "BORDIFY WIN32 FILE: CreateFileA WriteFile ReadFile CloseHandle verified" build/qemu-serial.log
+          grep -F "[win32-file] ring-3 Win32 CreateFile/WriteFile/ReadFile/CloseHandle roundtrip passed" build/qemu-serial.log
+          # The native ring-3 PE32 test must persist the exact data it read back.
+          mcopy -i "build/win64-installer-smoke.img@@1048576" "::APPS/WIN32.TXT" build/winio-extracted.txt
+          printf 'BORDIFY WIN32 FILE: CreateFileA WriteFile ReadFile CloseHandle verified\r\n' > build/winio-expected.txt
+          cmp build/winio-extracted.txt build/winio-expected.txt
+          echo "Win32 kernel32 ring-3 persistent file API test: PASS"
+          grep -F "BORDIFY WIN64: PE32+ x64 WriteFile interpreted on x86 kernel" build/qemu-serial.log
+          grep -F "[win64] PE32+ AMD64 interpreted safely; 3 imports; exited 0" build/qemu-serial.log
+          grep -F "[win64-install] PE32+ installer committed APP64.EXE (2048 bytes)" build/qemu-serial.log
+          grep -F "[win64-install] installed AMD64 application launched; exit 0" build/qemu-serial.log
+          # Validate real FAT16 persistence outside the running guest.
+          mcopy -i "build/win64-installer-smoke.img@@1048576" "::APPS/APP64.EXE" build/app64-extracted.exe
+          cmp build/app64-extracted.exe build/apps/win64demo.exe
+          echo "Persistent Windows x64 PE32+ installer test: PASS"
+          grep -F "BORDIFY DARWIN: NSString objc_msgSend and BSD write on ARM64" build/qemu-serial.log
+          grep -F "[darwin] ARM64 BSD syscall and NSString/NSApplication bridge verified; exited 0" build/qemu-serial.log
+          grep -F "BORDIFY COCOA: NSString NSWindow NSApplication lifecycle verified" build/qemu-serial.log
+          grep -F "[darwin-cocoa] ARM64 ObjC-linked NSString/NSWindow/NSApplication lifecycle passed; 25 imports, exit 0" build/qemu-serial.log
+          grep -F "[kernel] starting desktop" build/qemu-serial.log
+          if grep -q "PANIC" build/qemu-serial.log; then
+            echo "Kernel panic during boot smoke test"
+            exit 1
+          fi
 
       - name: Show image hashes
         run: cat dist/SHA256SUMS

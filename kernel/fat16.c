@@ -772,6 +772,53 @@ static int read_entry_data(const fat_entry_t *entry, void *buffer, uint32_t max_
     return (int)copied;
 }
 
+/*
+ * Read a bounded byte range without allocating a whole file.
+ * Useful for UDIF trailers at the END of multi-megabyte disk images.
+ * Returns exactly the available requested bytes, or -1 on invalid FAT
+ * chains / I/O. Unlike fat16_read, does not append a string terminator.
+ */
+int fat16_read_range(uint16_t dir_cluster, const char *name,
+                     uint32_t offset, void *buffer, uint32_t max_size) {
+    if (!mounted || !buffer || max_size == 0 || !volume.spc_bytes) {
+        return -1;
+    }
+    fat_entry_t entry;
+    if (!fat16_find(dir_cluster, name, &entry) ||
+        (entry.attr & FAT_ATTR_DIRECTORY) || offset > entry.size) {
+        return -1;
+    }
+    uint32_t wanted = MIN(entry.size - offset, max_size);
+    /* Return type is int; larger successful reads would wrap negative. */
+    if (wanted > 0x7fffffffu) return -1;
+    if (!wanted) return 0;
+
+    /* Walk the FAT chain without reading the skipped data clusters. */
+    uint32_t skip = offset / volume.spc_bytes;
+    if (skip >= volume.cluster_count) return -1;
+    uint16_t cluster = entry.cluster;
+    for (uint32_t i = 0; i < skip; ++i) {
+        if (cluster < 2 || cluster >= FAT16_EOC ||
+            cluster >= volume.cluster_count + 2) return -1;
+        cluster = fat_get(cluster);
+    }
+
+    uint32_t copied = 0;
+    uint32_t in_cluster = offset % volume.spc_bytes;
+    uint32_t guard = 0;
+    while (copied < wanted && guard++ < volume.cluster_count) {
+        if (cluster < 2 || cluster >= FAT16_EOC ||
+            cluster >= volume.cluster_count + 2) return -1;
+        if (!read_cluster(cluster, cluster_buffer)) return -1;
+        uint32_t take = MIN(volume.spc_bytes - in_cluster, wanted - copied);
+        kmemcpy((uint8_t *)buffer + copied, cluster_buffer + in_cluster, take);
+        copied += take;
+        in_cluster = 0;
+        if (copied < wanted) cluster = fat_get(cluster);
+    }
+    return copied == wanted ? (int)copied : -1;
+}
+
 int fat16_read(uint16_t dir_cluster, const char *name, void *buffer, uint32_t max_size) {
     fat_entry_t entry;
     if (!fat16_find(dir_cluster, name, &entry)) {

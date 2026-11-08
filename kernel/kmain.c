@@ -18,6 +18,10 @@
 #include "gui.h"
 #include "desktop.h"
 #include "icons.h"
+#include "process.h"
+#include "udif_demo.h"
+#include "a64_demo.h"
+#include "compat_demos.h"
 
 extern uint8_t kernel_end;
 
@@ -72,6 +76,39 @@ void kernel_main(uint32_t mb_info_address) {
         settings_defaults();
         kprintf("[kernel] no FAT16 disk, continuing with defaults\n");
     }
+
+    udif_demo_probe();
+    a64_demo_run();
+    process_init();
+    if (fat16_mounted()) {
+        /* Boot-time end-to-end test: runs from FAT16 at CPL3, not in kernel. */
+        int result = process_run_elf32("APPS", "HELLO.ELF");
+        if (result != 0) {
+            kprintf("[process] demo failed (status %d)\n", result);
+        }
+        /* An isolated page fault must NOT panic the kernel. */
+        int fault_result = process_run_elf32("APPS", "FAULT.ELF");
+        if (fault_result != -1) {
+            kprintf("[process] unexpected fault-test result %d\n", fault_result);
+        }
+    }
+
+    if (fat16_mounted()) {
+        int win32_result = process_run_win32_pe("APPS", "WINHELLO.EXE");
+        if (win32_result != 0) {
+            kprintf("[win32] demo failed (status %d)\n", win32_result);
+        }
+    }
+
+    if (fat16_mounted()) {
+        int winio=process_run_win32_pe("APPS","WINIO.EXE");
+        if (winio==0)
+            kprintf("[win32-file] ring-3 Win32 CreateFile/WriteFile/ReadFile/CloseHandle roundtrip passed\n");
+        else
+            kprintf("[win32-file] persistent Win32 file API demo failed: %d\n",winio);
+    }
+
+    compat_vm_demos();
 
     gui_init();
     kprintf("[kernel] starting desktop\n");

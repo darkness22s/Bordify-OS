@@ -8,6 +8,14 @@
 #include "pit.h"
 #include "string.h"
 #include "printf.h"
+#include "exec_inspect.h"
+#include "package_inspect.h"
+#include "udif_blkx.h"
+#include "hfsplus_probe.h"
+#include "a64_demo.h"
+#include "compat_demos.h"
+#include "dmg_install.h"
+#include "process.h"
 
 #define FILES_MAX_ENTRIES 128
 #define FILES_VIEWER_SIZE 14336
@@ -194,6 +202,102 @@ static void files_enter_dir(const fat_entry_t *entry) {
     files_refresh();
 }
 
+/* Read-only UDIF sector preview: no filesystem mount, writes or installers. */
+typedef struct {
+    uint16_t cluster;
+    const char *name;
+    uint32_t size;
+} dmg_file_reader_t;
+
+static int files_read_dmg_bytes(void *context, uint64_t at,
+                                void *dst, size_t length) {
+    dmg_file_reader_t *file = (dmg_file_reader_t *)context;
+    if (at > file->size || length > file->size - (uint32_t)at ||
+        length > UINT32_MAX) return -1;
+    return fat16_read_range(file->cluster, file->name,
+                            (uint32_t)at, dst, (uint32_t)length);
+}
+
+static void files_inspect_dmg_blocks(const fat_entry_t *entry,
+                                     const package_info_t *package) {
+    if (!package->valid || !package->metadata_length ||
+        package->metadata_length > 32768 ||
+        package->metadata_offset > UINT32_MAX)
+        return;
+    static char xml[32768];
+    static udif_block_map_t blocks;
+    int count = fat16_read_range(fs.cluster, entry->name,
+                                 (uint32_t)package->metadata_offset,
+                                 xml, (uint32_t)package->metadata_length);
+    if (count != (int)package->metadata_length) return;
+    if (!udif_blkx_from_xml(xml, (size_t)count, package->data_offset,
+                            entry->size, &blocks)) return;
+
+    dmg_file_reader_t file = {fs.cluster, entry->name, entry->size};
+    uint8_t sector[UDIF_SECTOR_SIZE];
+    udif_io_result_t result =
+        udif_blkx_read_sector(&blocks, blocks.sector_start,
+                              files_read_dmg_bytes, &file, sector);
+    const char *status = result == UDIF_IO_OK ? "Read-only sector access OK" :
+                         result == UDIF_IO_UNSUPPORTED ? "Compression codec/size not supported" :
+                         "Sector read failed";
+    size_t used = kstrlen(fs.viewer_text);
+    if (used < sizeof(fs.viewer_text)) {
+        snprintf(fs.viewer_text + used, sizeof(fs.viewer_text) - used,
+                 "\n\nFirst blkx partition: %u mapped runs\n"
+                 "Contains compressed blocks: %s\n"
+                 "First sector: %s\n"
+                 "Filesystem mounting and installation remain unsupported.",
+                 blocks.runs_count, blocks.has_compressed ? "Yes" : "No",
+                 status);
+    }
+    /* HFS+ / HFSX header lives at byte 1024, logical sector 2. */
+    if (blocks.sector_count >= 3 &&
+        udif_blkx_read_sector(&blocks, blocks.sector_start + 2,
+                              files_read_dmg_bytes, &file, sector) == UDIF_IO_OK) {
+        hfsplus_volume_info_t volume;
+        if (hfsplus_probe_header(sector, sizeof(sector),
+                                 blocks.sector_count, &volume)) {
+            used = kstrlen(fs.viewer_text);
+            if (used < sizeof(fs.viewer_text)) {
+                snprintf(fs.viewer_text + used, sizeof(fs.viewer_text) - used,
+                         "\n\nDetected %s volume header (read-only)\n"
+                         "Allocation block: %u bytes\n"
+                         "Total blocks: %u; free blocks: %u\n"
+                         "Catalog first extent: %u (%u blocks)\n"
+                         "This is NOT a mounted filesystem.",
+                         volume.case_sensitive ? "HFSX" : "HFS+",
+                         volume.block_size, volume.total_blocks,
+                         volume.free_blocks, volume.catalog_first_block,
+                         volume.catalog_extent_blocks);
+            }
+            uint64_t catalog_sector;
+            if (hfsplus_catalog_first_sector(&volume, blocks.sector_count,
+                                              &catalog_sector) &&
+                udif_blkx_read_sector(&blocks,
+                                      blocks.sector_start + catalog_sector,
+                                      files_read_dmg_bytes, &file,
+                                      sector) == UDIF_IO_OK) {
+                hfsplus_catalog_info_t catalog;
+                if (hfsplus_catalog_probe(sector, sizeof(sector),
+                                           volume.catalog_logical_size,
+                                           &catalog)) {
+                    used = kstrlen(fs.viewer_text);
+                    if (used < sizeof(fs.viewer_text))
+                        snprintf(fs.viewer_text + used,
+                                 sizeof(fs.viewer_text) - used,
+                                 "\\nCatalog B-tree header verified (read-only)"
+                                 "\\nRoot node: %u; node size: %u"
+                                 "\\nLeaf records: %u; total nodes: %u"
+                                 "\\nCatalog traversal is NOT supported.",
+                                 catalog.root_node, catalog.node_size,
+                                 catalog.leaf_records, catalog.total_nodes);
+                }
+            }
+        }
+    }
+}
+
 static void files_open_selected(void) {
     if (fs.selected < 0 || fs.selected >= fs.count) {
         return;
@@ -203,12 +307,194 @@ static void files_open_selected(void) {
         files_enter_dir(entry);
         return;
     }
+    /* Native ELF32 apps are launched from /APPS in isolated ring 3.
+     * PE/Mach-O remain inspection-only until their runtimes are available. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kends_with(entry->name, ".ELF")) {
+        int code = process_run_elf32("APPS", entry->name);
+        set_status(code == 0 ? "Native app exited successfully" :
+                               "Native app failed; inspect serial log");
+        return;
+    }
+    /* Only the audited Win32 demonstration is executable so far;
+       arbitrary EXEs stay inspection-only until process limits improve. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "WINHELLO.EXE") == 0) {
+        int code = process_run_win32_pe("APPS", entry->name);
+        set_status(code == 0 ? "Win32 console demo exited successfully" :
+                               "Win32 demo failed; inspect serial log");
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "WINIO.EXE") == 0) {
+        int code=process_run_win32_pe("APPS","WINIO.EXE");
+        set_status(code == 0 ? "Win32 disk file roundtrip passed" :
+                               "Win32 file compatibility test failed");
+        files_refresh();
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "ARMHELLO.MCH") == 0) {
+        int code = a64_demo_run();
+        set_status(code == 0 ? "ARM64 Mach-O demo interpreted successfully" :
+                               "ARM64 demo failed; inspect serial log");
+        return;
+    }
+    /* Only audited 64-bit and Darwin demos are interpreted; arbitrary
+     * installers and foreign programs remain inspection-only. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "WIN64.EXE") == 0) {
+        int code = compat_win64_demo_run();
+        set_status(code == 0 ? "x64 PE32+ interpreted successfully" :
+                               "x64 demo failed; inspect serial log");
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "DARWIN.MCH") == 0) {
+        int code = compat_darwin_demo_run();
+        set_status(code == 0 ? "Darwin ARM64 bridge demo succeeded" :
+                               "Darwin demo failed; inspect serial log");
+        return;
+    }
+    /* The Windows x64 setup is audited and confined to APP64.EXE. No
+     * arbitrary downloaded installers are executable at this stage. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "SETUP64.EXE") == 0) {
+        int code=compat_win64_installer_run();
+        set_status(code == 0 ? "x64 setup installed and launched APP64.EXE" :
+                               "x64 installation failed; see serial log");
+        files_refresh();
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "APP64.EXE") == 0) {
+        int code=compat_win64_installed_run();
+        set_status(code == 0 ? "Installed x64 application exited successfully" :
+                               "Installed x64 application failed");
+        return;
+    }
+    /* Fixed, audited HFS+ extraction demo only. Other DMGs remain
+     * inspection-only and never run installation scripts. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "MOUNT.DMG") == 0) {
+        int code = dmg_install_demo();
+        set_status(code == 0 ? "HFS+ DMG app installed and launched" :
+                               "DMG extraction failed; inspect serial");
+        files_refresh();
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "DMGAPP.MCH") == 0) {
+        int code = dmg_installed_demo_run();
+        set_status(code == 0 ? "Installed Mach-O launched successfully" :
+                               "Installed Mach-O demo failed");
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "ARMWORK.MCH") == 0) {
+        int code=compat_arm64_workload_run();
+        set_status(code == 0 ? "Compiled ARM64 app exited successfully" :
+                               "Compiled ARM64 app failed; inspect serial log");
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "ARMCALC.MCH") == 0) {
+        int code=compat_arm64_c_run();
+        set_status(code == 0 ? "Clang C ARM64 checksum app succeeded" :
+                               "Compiled C ARM64 app failed; inspect serial");
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "COCOA.MCH") == 0) {
+        int code=compat_cocoa_lifecycle_run();
+        set_status(code == 0 ? "ObjC/AppKit lifecycle demo passed" :
+                               "ObjC/AppKit demo failed; inspect serial");
+        return;
+    }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
     if (bytes < 0) {
         set_status("Could not read file");
         return;
     }
     fs.viewer_text[bytes] = 0;
+    /*
+     * Installer/format inspection only. Never jump into untrusted code or
+     * accidentally render raw installer data as a string.
+     *
+     * UDIF has its header at EOF; a 512-byte ranged FAT16 read avoids
+     * bringing a potentially very large disk image into kernel memory.
+     */
+    package_info_t package;
+    size_t name_len = kstrlen(entry->name);
+    bool is_dmg = name_len >= 4 &&
+                  kstricmp(entry->name + name_len - 4, ".DMG") == 0;
+    bool identified = false;
+    if (is_dmg) {
+        uint8_t trailer[512];
+        int tail_bytes = entry->size >= 512 ?
+            fat16_read_range(fs.cluster, entry->name, entry->size - 512,
+                             trailer, sizeof(trailer)) : -1;
+        bool recognized = tail_bytes == 512 &&
+            package_inspect_dmg_trailer(trailer, sizeof(trailer),
+                                        entry->size, &package);
+        if (recognized) {
+            snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                     "Apple disk image: %s\n"
+                     "Type: %s\n"
+                     "Trailer: %s\n"
+                     "Image size: %u bytes\n"
+                     "Virtual disk: %u MiB\n\n"
+                     "%s\n\n"
+                     "Bordify cannot mount or install DMG images yet.",
+                     entry->display, package_format_name(package.format),
+                     package.valid ? "Recognized" : "Malformed",
+                     entry->size,
+                     (uint32_t)(package.virtual_disk_bytes / (1024u * 1024u)),
+                     package_compatibility_note(package.format));
+            files_inspect_dmg_blocks(entry, &package);
+        } else {
+            snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                     "Cannot open %s as a DMG.\n"
+                     "A complete UDIF image must have a valid 512-byte\n"
+                     "koly trailer at the end of the file.\n\n"
+                     "The image may be truncated or use another format.",
+                     entry->display);
+        }
+        identified = true;
+    }
+    if (!identified && package_inspect_prefix(fs.viewer_text, (size_t)bytes,
+                                               entry->size, &package)) {
+        snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                 "Installer/container: %s\n"
+                 "Type: %s\n"
+                 "Header: %s\n"
+                 "File size: %u bytes\n\n"
+                 "%s\n\n"
+                 "Bordify can inspect this container but cannot install it yet.",
+                 entry->display, package_format_name(package.format),
+                 package.valid ? "Recognized" : "Invalid or incomplete",
+                 entry->size, package_compatibility_note(package.format));
+        identified = true;
+    }
+    if (!identified) {
+        exec_info_t executable;
+        if (exec_inspect(fs.viewer_text, (size_t)bytes, &executable)) {
+            snprintf(fs.viewer_text, sizeof(fs.viewer_text),
+                     "Executable file: %s\n"
+                     "Format: %s\n"
+                     "CPU: %s\n"
+                     "Header: %s\n"
+                     "File size: %u bytes\n\n"
+                     "%s\n\n"
+                     "Bordify does not execute foreign binaries yet.\n"
+                     "64-bit apps need a 64-bit process/runtime environment.",
+                     entry->display,
+                     exec_format_name(executable.format),
+                     exec_arch_name(executable.arch),
+                     executable.valid ? "Recognized" : "Invalid or truncated",
+                     entry->size, exec_compatibility_note(&executable));
+        }
+    }
     kstrncpy(fs.viewer_name, entry->name, sizeof(fs.viewer_name) - 1);
     fs.viewer_name[sizeof(fs.viewer_name) - 1] = 0;
     fs.viewer_scroll = 0;
@@ -408,14 +694,15 @@ static void draw_sidebar(gui_window_t *window, files_layout_t *l) {
     gfx_vline(sx + l->sidebar_w, sy, sy + sh - 1, settings_line());
     gfx_text(&font_ui_small, sx + 18, sy + 16, "LOCATIONS", settings_muted());
 
-    const char *labels[4] = { "Home", "Documents", "Web", "System" };
-    for (int i = 0; i < 4; i++) {
+    const char *labels[5] = { "Home", "Documents", "Web", "System", "Apps" };
+    for (int i = 0; i < 5; i++) {
         int iy = sy + 42 + i * 38;
         int ix = sx + 10;
         bool active = (i == 0 && fs.depth == 0) ||
                       (i == 1 && kstricmp(fs.path, "/DOCS") == 0) ||
                       (i == 2 && kstricmp(fs.path, "/WEB") == 0) ||
-                      (i == 3 && kstricmp(fs.path, "/SYSTEM") == 0);
+                      (i == 3 && kstricmp(fs.path, "/SYSTEM") == 0) ||
+                      (i == 4 && kstricmp(fs.path, "/APPS") == 0);
         bool hover = ui_point_in(ix, iy, l->sidebar_w - 20, 32, mouse.x, mouse.y);
         if (active || hover) {
             gfx_rounded_fill(ix, iy, l->sidebar_w - 20, 32, 7,
@@ -622,6 +909,10 @@ static void files_sidebar_click(int x, int y, files_layout_t *l) {
             } else if (i == 3) {
                 if (!files_go_named_in_root("SYSTEM")) {
                     set_status("System folder missing");
+                }
+            } else if (i == 4) {
+                if (!files_go_named_in_root("APPS")) {
+                    set_status("Apps folder missing");
                 }
             }
             return;
