@@ -29,8 +29,12 @@ static void test_udif(void) {
     assert(package_inspect_dmg_trailer(p, sizeof(p), 5120, &info));
     assert(info.valid && info.format == PACKAGE_DMG_UDIF);
     assert(info.virtual_disk_bytes == 4096 && info.metadata_offset == 4096);
-    assert(package_inspect_dmg_trailer(p, 200, 5120, &info) && !info.valid);
-    assert(package_inspect_dmg_trailer(p, sizeof(p), 500, &info) && !info.valid);
+    assert(!package_inspect_dmg_trailer(p, 200, 5120, &info));
+    assert(info.format==PACKAGE_UNKNOWN && !info.valid);
+    assert(!package_inspect_dmg_trailer(p, 4, 5120, &info));
+    assert(info.format==PACKAGE_UNKNOWN && !info.valid);
+    assert(!package_inspect_dmg_trailer(p, sizeof(p), 500, &info));
+    assert(info.format==PACKAGE_UNKNOWN && !info.valid);
     be64set(p + 224, UINT64_MAX);
     assert(package_inspect_dmg_trailer(p, sizeof(p), 5120, &info) && !info.valid);
     udif(p); be64set(p + 492, UINT64_MAX);
