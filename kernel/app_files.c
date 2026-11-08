@@ -389,6 +389,13 @@ static void files_open_selected(void) {
                                "Compiled ARM64 app failed; inspect serial log");
         return;
     }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "ARMCALC.MCH") == 0) {
+        int code=compat_arm64_c_run();
+        set_status(code == 0 ? "Clang C ARM64 checksum app succeeded" :
+                               "Compiled C ARM64 app failed; inspect serial");
+        return;
+    }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
     if (bytes < 0) {
         set_status("Could not read file");
