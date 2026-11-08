@@ -22,6 +22,8 @@ typedef struct {
     void *context;
     uint32_t allocation_block_bytes;
     uint32_t total_allocation_blocks;
+    uint32_t bitmap_first_block;
+    uint32_t bitmap_extent_blocks;
     uint64_t catalog_start_sector;
     uint64_t catalog_bytes;
     uint32_t root_node;
