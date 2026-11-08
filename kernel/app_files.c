@@ -11,6 +11,7 @@
 #include "exec_inspect.h"
 #include "package_inspect.h"
 #include "udif_blkx.h"
+#include "a64_demo.h"
 #include "process.h"
 
 #define FILES_MAX_ENTRIES 128
@@ -274,6 +275,13 @@ static void files_open_selected(void) {
         int code = process_run_win32_pe("APPS", entry->name);
         set_status(code == 0 ? "Win32 console demo exited successfully" :
                                "Win32 demo failed; inspect serial log");
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "ARMHELLO.MCH") == 0) {
+        int code = a64_demo_run();
+        set_status(code == 0 ? "ARM64 Mach-O demo interpreted successfully" :
+                               "ARM64 demo failed; inspect serial log");
         return;
     }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
