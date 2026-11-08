@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32, restricted Windows PE32 console execution, read-only raw/zero/zlib UDIF sectors with HFS+ volume and bounded catalog B-tree header probes, and a tiny ARM64 Mach-O interpreter all verified in QEMU**. Full Windows x64 installers, DMG mount/install, Apple Silicon macOS apps and Darwin/Cocoa applications are **NOT** supported.
+Status: **native ELF32 and x86 PE32 console demos, bounded PE32+ AMD64 interpreter, ARM64 Mach-O interpreter with opt-in Darwin BSD syscall and Objective-C guest shims, and read-only DMG/HFS+ probes verified in QEMU**. Real Windows x64 installers, macOS applications, DMG installation and full Darwin/Cocoa frameworks are **NOT** supported.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -9,11 +9,11 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 
 | Requested feature | Verified now | Not yet working |
 | --- | --- | --- |
-| Windows x64 EXE installers | Windows **x86 PE32** demo calls three kernel32 functions | PE32+ x64 CPU execution, 64-bit DLLs, registry, installation APIs and real setup engines |
+| Windows x64 EXE installers | 🟡 Real **PE32+ AMD64** demo interpreted with Win64 calling convention and three `kernel32` imports in QEMU | **No actual installer execution**; full x64 instruction set, DLL loading, file/registry/install APIs, process isolation and real setup engines |
 | macOS DMG mounting and installation | DMG footer + XML blkx maps; raw/zero/zlib sectors and read-only HFS+ volume and catalog B-tree header metadata from FAT16 disk | Other compression codecs, HFS+ catalog record traversal, APFS, full filesystem mounting, PKG/.app installation |
 | Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
 | Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
-| macOS Darwin/Cocoa runtime | Mach-O metadata recognition and synthetic ARM64 instruction demo | dyld, libSystem, Objective-C/Swift, Foundation, Cocoa/AppKit and macOS services |
+| macOS Darwin/Cocoa runtime | 🟡 ARM64 Mach-O demo calls BSD `write/exit/getpid` subset and experimental ObjC `objc_getClass/objc_msgSend` shim for `NSString` and `NSApplication` methods | Real dyld/libobjc symbol linkage, broader libSystem/Objective-C/Swift, Foundation/AppKit GUI, and actual macOS app compatibility |
 
 **Release policy:** Only mark an item green after a real, licensed sample installer and installed application have passed automated end-to-end tests. A synthetic fixture is a lower-level milestone.
 
@@ -84,7 +84,19 @@ A standalone, synthetic **Apple Silicon ARM64 Mach-O** with a genuine `MH_MAGIC_
 
 ### Stage 1.5 — Restricted real Win32 PE32 console execution (in this PR)
 
-Implemented a bounded PE32 loader for a single x86 executable at the fixed user base `0x40000000`, with checked sections, import names and a four-function `kernel32.dll` bridge implemented as ring-3 stdcall trampolines: `ExitProcess`, `GetStdHandle`, `WriteFile`, and `GetLastError`. The independently generated `APPS/WINHELLO.EXE` is a real PE32 executable with a proper import table; it calls `GetStdHandle`, `WriteFile`, and `ExitProcess`. The VM boot test requires its console output and exit status, and it can be launched from the Files Apps sidebar. Unsupported machine types, invalid headers, unknown imports, relocation-dependent images and non-console executables are deliberately refused. This is **not** general Windows compatibility; it supports an intentionally tiny console-only API subset and must not be used to run untrusted installers. No x64 / PE32+ execution is implemented.
+Implemented a bounded PE32 loader for a single x86 executable at the fixed user base `0x40000000`, with checked sections, import names and a four-function `kernel32.dll` bridge implemented as ring-3 stdcall trampolines: `ExitProcess`, `GetStdHandle`, `WriteFile`, and `GetLastError`. The independently generated `APPS/WINHELLO.EXE` is a real PE32 executable with a proper import table; it calls `GetStdHandle`, `WriteFile`, and `ExitProcess`. The VM boot test requires its console output and exit status, and it can be launched from the Files Apps sidebar. Unsupported machine types, invalid headers, unknown imports, relocation-dependent images and non-console executables are deliberately refused. This is **not** general Windows compatibility; it supports an intentionally tiny console-only API subset and must not be used to run untrusted installers. Full x64 installer execution is not implemented; a **separate, interpreted PE32+ proof** is described below.
+
+### Stage 1.6 — PE32+ AMD64 console interpreter (QEMU verified)
+
+`APPS/WIN64.EXE` is a **real PE32+ AMD64** sample with a 64-bit PE optional header, a mapped x64 section, import directory, 64-bit IAT thunks, and Microsoft x64 calling-convention arguments. The freestanding `kernel/pe64_vm.c` interpreter checks headers, sections, import strings, bounds and instruction count before stepping a very small x64 instruction subset. Its guest-only call dispatcher models `GetStdHandle`, `WriteFile`, `ExitProcess` and `GetLastError` from `kernel32.dll`. The guest program prints through `WriteFile` and exits successfully; tests reject malformed PE32+, imports, unsupported instructions and invalid guest memory. Boot and Files can launch this audited sample.
+
+**Important:** x64 code is **interpreted**, not natively run in CPU long mode. No general x64 executables, Win64 DLLs, Windows GUI, installer engines, installer file operations, permissions or registry are implemented. This is a *yellow foundation for the Windows x64 installer roadmap*, not a working x64 installer feature.
+
+### Stage 1.7 — Experimental ARM64 Darwin BSD/Objective-C bridge (QEMU verified)
+
+The ARM64 interpreter has an opt-in Darwin mode in `a64_macho_run_darwin` while preserving its original strict Bordify demo mode. Darwin mode handles a bounded subset of ARM64 `SVC #0x80` BSD calls (`write`, `exit`, deterministic `getpid`) and a **test-only** `SVC #0x81` bridge implementing limited `objc_getClass`, `sel_registerName`, and `objc_msgSend` semantics. The bridge supports `NSString stringWithUTF8String:`, `UTF8String`, and `NSApplication sharedApplication`/`isRunning`, with validated in-guest strings, memory bounds and unsupported-selector rejection.
+
+A generated **real Mach-O ARM64** test binary `APPS/DARWIN.MCH` calls the bridge and Darwin-style BSD write, producing expected serial output and exiting under x86 QEMU; host negative tests also verify fail-closed behavior. Both demos can be launched from Files. However, `SVC #0x81` is a Bordify-specific bridging convention—not actual `libobjc` dynamic-symbol linkage. There is **no dyld, Cocoa GUI/event loop, real macOS framework implementation, or arbitrary Apple application execution**. Do not confuse this research shim with a supported Darwin/Cocoa runtime.
 
 ### Stage 2 — Target Windows x86 applications
 
