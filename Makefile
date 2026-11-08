@@ -61,8 +61,13 @@ $(BUILD)/tests/exec_inspect_test: tests/exec_inspect_test.c kernel/exec_inspect.
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/exec_inspect_test.c kernel/exec_inspect.c -o $@
 
-test: $(BUILD)/tests/exec_inspect_test
+$(BUILD)/tests/package_inspect_test: tests/package_inspect_test.c kernel/package_inspect.c kernel/package_inspect.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/package_inspect_test.c kernel/package_inspect.c -o $@
+
+test: $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test
 	./$(BUILD)/tests/exec_inspect_test
+	./$(BUILD)/tests/package_inspect_test
 
 clean:
 	rm -rf $(BUILD) dist
