@@ -2,6 +2,7 @@
 #include "io.h"
 #include "printf.h"
 #include "string.h"
+#include "process.h"
 
 typedef struct {
     uint16_t offset_low;
@@ -21,6 +22,7 @@ static idt_pointer_t idt_ptr;
 static irq_handler_t irq_handlers[16];
 
 extern void (*isr_stub_table[48])(void);
+extern void isr128(void);
 
 static void idt_set_gate(int vector, void (*handler)(void), uint8_t type_attr) {
     uint32_t address = (uint32_t)(uintptr_t)handler;
@@ -102,6 +104,12 @@ void interrupt_dispatch(uint32_t *frame) {
         outb(0x20, 0x20);
         return;
     }
+    /* The int 0x80 gate is available to CPL3 only; all other handlers
+       remain ring-0. User faults are contained rather than panicking OS. */
+    if (vector == 128 || ((frame[11] & 3u) == 3u)) {
+        process_handle_interrupt(frame);
+        return;
+    }
     uint32_t error = frame[9];
     uint32_t eip = frame[10];
     panic("CPU exception %u (error 0x%08x) at eip 0x%08x",
@@ -117,6 +125,8 @@ void idt_init(void) {
     for (int i = 0; i < 48; i++) {
         idt_set_gate(i, isr_stub_table[i], 0x8E);
     }
+
+    idt_set_gate(128, isr128, 0xEE); /* DPL=3 software syscall */
 
     __asm__ volatile("lidt (%0)" : : "r"(&idt_ptr));
     pic_remap();
