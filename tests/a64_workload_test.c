@@ -50,6 +50,15 @@ int main(void) {
     assert(!r.finished);
     memcpy(file+0x12c,original,4);
 
+    /* Malformed guest pair-stack operation with an extreme unsigned base
+     * must fail safely without signed conversion overflow. */
+    memcpy(original,file+0x100,4);
+    set32(file+0x100,0x92800000u); /* MOVN X0,#0 -> UINT64_MAX */
+    memcpy(file+0x104,4);
+    set32(file+0x104,0xa9807c01u); /* STP X1,XZR,[X0,#-16]! */
+    assert(!a64_macho_run_darwin(file,n,guest,sizeof(guest),on_output,NULL,&r));
+    memcpy(file+0x100,original,4);
+    /* The next instruction is restored from the compiler fixture below. */
     /* Reject unsupported instruction in the function prologue. */
     memcpy(original,file+0x100,4);
     set32(file+0x100,0xffffffffu);
