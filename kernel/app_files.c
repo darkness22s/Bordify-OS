@@ -347,6 +347,23 @@ static void files_open_selected(void) {
                                "Darwin demo failed; inspect serial log");
         return;
     }
+    /* The Windows x64 setup is audited and confined to APP64.EXE. No
+     * arbitrary downloaded installers are executable at this stage. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "SETUP64.EXE") == 0) {
+        int code=compat_win64_installer_run();
+        set_status(code == 0 ? "x64 setup installed and launched APP64.EXE" :
+                               "x64 installation failed; see serial log");
+        files_refresh();
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "APP64.EXE") == 0) {
+        int code=compat_win64_installed_run();
+        set_status(code == 0 ? "Installed x64 application exited successfully" :
+                               "Installed x64 application failed");
+        return;
+    }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
     if (bytes < 0) {
         set_status("Could not read file");
