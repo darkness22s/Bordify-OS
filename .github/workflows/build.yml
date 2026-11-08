@@ -59,6 +59,13 @@ jobs:
           grep -F "[dmg] read-only raw UDIF sector verified in QEMU" build/qemu-serial.log
           grep -F "[dmg] zlib compressed UDIF sector verified in QEMU" build/qemu-serial.log
           grep -F "[hfsplus] compressed DMG HFS+ volume and catalog header verified in QEMU" build/qemu-serial.log
+          grep -F "[dmg] zlib UDIF HFS+ read-only mount; found DARWIN.MCH (1024 bytes)" build/qemu-serial.log
+          grep -F "[dmg-install] extracted HFS+ file to APPS/DMGAPP.MCH (1024 bytes)" build/qemu-serial.log
+          grep -F "[dmg-install] extracted Mach-O ARM64 app launched; exit 0" build/qemu-serial.log
+          # Validate the installed macOS-format file was saved persistently.
+          mcopy -i "build/win64-installer-smoke.img@@1048576" "::APPS/DMGAPP.MCH" build/dmgapp-extracted.mch
+          cmp build/dmgapp-extracted.mch build/apps/darwin.mch
+          echo "Persistent compressed DMG/HFS+ extraction test: PASS"
           grep -F "BORDIFY ARM64: interpreted Mach-O demo under x86 QEMU" build/qemu-serial.log
           grep -F "[arm64] Mach-O interpreted safely; guest exited 0 after 7 steps" build/qemu-serial.log
           grep -F "[process] paging on" build/qemu-serial.log
