@@ -141,9 +141,10 @@ bool exec_inspect(const void *data, size_t size, exec_info_t *out) {
         if (p[0] == 0x7f && p[1] == 'E' && p[2] == 'L' && p[3] == 'F') {
             if (!available(size, 0, 5)) return true;
             out->format = p[4] == 2 ? EXEC_FORMAT_ELF64 : EXEC_FORMAT_ELF32;
-            if (!available(size, 0, 20)) return true;
             uint8_t cls = p[4], endian = p[5];
             if ((cls != 1 && cls != 2) || (endian != 1 && endian != 2)) return true;
+            /* A complete ELF header is required before calling it valid. */
+            if (!available(size, 0, cls == 1 ? 52 : 64)) return true;
             uint16_t machine = endian == 1 ? u16le(p + 18) :
                 (uint16_t)(((uint16_t)p[18] << 8) | p[19]);
             out->arch = elf_arch(machine);
