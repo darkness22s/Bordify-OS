@@ -10,6 +10,7 @@
 #include "printf.h"
 #include "exec_inspect.h"
 #include "package_inspect.h"
+#include "udif_blkx.h"
 #include "process.h"
 
 #define FILES_MAX_ENTRIES 128
@@ -197,6 +198,57 @@ static void files_enter_dir(const fat_entry_t *entry) {
     files_refresh();
 }
 
+/* Read-only UDIF sector preview: no filesystem mount, writes or installers. */
+typedef struct {
+    uint16_t cluster;
+    const char *name;
+    uint32_t size;
+} dmg_file_reader_t;
+
+static int files_read_dmg_bytes(void *context, uint64_t at,
+                                void *dst, size_t length) {
+    dmg_file_reader_t *file = (dmg_file_reader_t *)context;
+    if (at > file->size || length > file->size - (uint32_t)at ||
+        length > UINT32_MAX) return -1;
+    return fat16_read_range(file->cluster, file->name,
+                            (uint32_t)at, dst, (uint32_t)length);
+}
+
+static void files_inspect_dmg_blocks(const fat_entry_t *entry,
+                                     const package_info_t *package) {
+    if (!package->valid || !package->metadata_length ||
+        package->metadata_length > 32768 ||
+        package->metadata_offset > UINT32_MAX)
+        return;
+    static char xml[32768];
+    static udif_block_map_t blocks;
+    int count = fat16_read_range(fs.cluster, entry->name,
+                                 (uint32_t)package->metadata_offset,
+                                 xml, (uint32_t)package->metadata_length);
+    if (count != (int)package->metadata_length) return;
+    if (!udif_blkx_from_xml(xml, (size_t)count, package->data_offset,
+                            entry->size, &blocks)) return;
+
+    dmg_file_reader_t file = {fs.cluster, entry->name, entry->size};
+    uint8_t sector[UDIF_SECTOR_SIZE];
+    udif_io_result_t result =
+        udif_blkx_read_sector(&blocks, blocks.sector_start,
+                              files_read_dmg_bytes, &file, sector);
+    const char *status = result == UDIF_IO_OK ? "Read-only sector access OK" :
+                         result == UDIF_IO_UNSUPPORTED ? "Compressed sector: unsupported" :
+                         "Sector read failed";
+    size_t used = kstrlen(fs.viewer_text);
+    if (used < sizeof(fs.viewer_text)) {
+        snprintf(fs.viewer_text + used, sizeof(fs.viewer_text) - used,
+                 "\n\nFirst blkx partition: %u mapped runs\n"
+                 "Contains compressed blocks: %s\n"
+                 "First sector: %s\n"
+                 "Filesystem mounting and installation remain unsupported.",
+                 blocks.runs_count, blocks.has_compressed ? "Yes" : "No",
+                 status);
+    }
+}
+
 static void files_open_selected(void) {
     if (fs.selected < 0 || fs.selected >= fs.count) {
         return;
@@ -264,6 +316,7 @@ static void files_open_selected(void) {
                      entry->size,
                      (uint32_t)(package.virtual_disk_bytes / (1024u * 1024u)),
                      package_compatibility_note(package.format));
+            files_inspect_dmg_blocks(entry, &package);
         } else {
             snprintf(fs.viewer_text, sizeof(fs.viewer_text),
                      "Cannot open %s as a DMG.\n"
