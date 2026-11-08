@@ -120,7 +120,7 @@ void process_init(void) {
      * Identity-map the 32-bit address space for the existing kernel, using
      * supervisor-only 4 MiB pages. MMIO and the GRUB framebuffer therefore
      * retain their addresses. The single user PDE replaces the 1-GiB
-     * identity mapping with only 256 KiB of explicitly user-accessible RAM.
+     * identity mapping with a bounded 2 MiB of explicitly user-accessible RAM.
      * This is a transitional design, NOT mature VM management.
      */
     for (uint32_t i = 0; i < 1024; ++i) {
@@ -254,12 +254,12 @@ int process_run_win32_pe(const char *directory, const char *filename) {
         !(folder.attr & FAT_ATTR_DIRECTORY) ||
         !fat16_find(folder.cluster, filename, &entry) ||
         (entry.attr & FAT_ATTR_DIRECTORY) ||
-        entry.size < 512 || entry.size > 64u * 1024u) {
+        entry.size < 512 || entry.size > 2u * 1024u * 1024u) {
         kprintf("[win32] executable not found or outside PE32 sandbox limits\n");
         return -1;
     }
     /* Reuse a fixed staging buffer; the bump heap cannot free allocations. */
-    static uint8_t file_bytes[64u * 1024u];
+    static uint8_t file_bytes[2u * 1024u * 1024u];
     if (fat16_read(folder.cluster, filename, file_bytes, entry.size) !=
         (int)entry.size) {
         kprintf("[win32] failed to read PE32 image\n");
