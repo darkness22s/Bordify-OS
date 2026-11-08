@@ -11,6 +11,7 @@
 #include "exec_inspect.h"
 #include "package_inspect.h"
 #include "udif_blkx.h"
+#include "hfsplus_probe.h"
 #include "a64_demo.h"
 #include "process.h"
 
@@ -247,6 +248,28 @@ static void files_inspect_dmg_blocks(const fat_entry_t *entry,
                  "Filesystem mounting and installation remain unsupported.",
                  blocks.runs_count, blocks.has_compressed ? "Yes" : "No",
                  status);
+    }
+    /* HFS+ / HFSX header lives at byte 1024, logical sector 2. */
+    if (blocks.sector_count >= 3 &&
+        udif_blkx_read_sector(&blocks, blocks.sector_start + 2,
+                              files_read_dmg_bytes, &file, sector) == UDIF_IO_OK) {
+        hfsplus_volume_info_t volume;
+        if (hfsplus_probe_header(sector, sizeof(sector),
+                                 blocks.sector_count, &volume)) {
+            used = kstrlen(fs.viewer_text);
+            if (used < sizeof(fs.viewer_text)) {
+                snprintf(fs.viewer_text + used, sizeof(fs.viewer_text) - used,
+                         "\n\nDetected %s volume header (read-only)\n"
+                         "Allocation block: %u bytes\n"
+                         "Total blocks: %u; free blocks: %u\n"
+                         "Catalog first extent: %u (%u blocks)\n"
+                         "This is NOT a mounted filesystem.",
+                         volume.case_sensitive ? "HFSX" : "HFS+",
+                         volume.block_size, volume.total_blocks,
+                         volume.free_blocks, volume.catalog_first_block,
+                         volume.catalog_extent_blocks);
+            }
+        }
     }
 }
 
