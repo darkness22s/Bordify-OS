@@ -14,6 +14,7 @@
 #include "hfsplus_probe.h"
 #include "a64_demo.h"
 #include "compat_demos.h"
+#include "dmg_install.h"
 #include "process.h"
 
 #define FILES_MAX_ENTRIES 128
@@ -362,6 +363,23 @@ static void files_open_selected(void) {
         int code=compat_win64_installed_run();
         set_status(code == 0 ? "Installed x64 application exited successfully" :
                                "Installed x64 application failed");
+        return;
+    }
+    /* Fixed, audited HFS+ extraction demo only. Other DMGs remain
+     * inspection-only and never run installation scripts. */
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "MOUNT.DMG") == 0) {
+        int code = dmg_install_demo();
+        set_status(code == 0 ? "HFS+ DMG app installed and launched" :
+                               "DMG extraction failed; inspect serial");
+        files_refresh();
+        return;
+    }
+    if (kstricmp(fs.path, "/APPS") == 0 &&
+        kstricmp(entry->name, "DMGAPP.MCH") == 0) {
+        int code = dmg_installed_demo_run();
+        set_status(code == 0 ? "Installed Mach-O launched successfully" :
+                               "Installed Mach-O demo failed");
         return;
     }
     int bytes = fat16_read(fs.cluster, entry->name, fs.viewer_text, sizeof(fs.viewer_text) - 1);
