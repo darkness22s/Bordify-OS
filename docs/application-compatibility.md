@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **executable + installer-container inspection implemented; installing and launching foreign apps not implemented**.
+Status: **native x86 ELF32 ring-3 execution demonstrated with QEMU; executable + installer-container inspection implemented; Windows and macOS installation/launch are NOT implemented**.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is no user-process model, virtual address-space isolation, syscall ABI, dynamic linker, 64-bit CPU mode, or general-purpose executable loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -34,7 +34,14 @@ Notes: executable/container prefix inspection examines only the bytes File Manag
 - **MSI:** OLE/CFB signature alone is not proof of a Windows Installer database; use the MSI directory/stream structures to validate and install under a Windows Installer-compatible runtime.
 - **Hardware:** Plan a x86-64 kernel and 64-bit boot path while keeping the current 32-bit boot image working until a tested replacement exists.
 
-### Stage 1 — Native process infrastructure (required before foreign apps)
+### Stage 1 — Native process infrastructure (first executable milestone)
+
+**Implemented in this PR:** 32-bit x86 GDT user selectors and a TSS kernel stack, a basic supervisor-only identity paging arrangement with one 256-KiB user mapping, `int 0x80` serial-write and exit syscalls, ELF32 PT_LOAD parsing and mapping with range checks, a demo user program read from FAT16, and a deliberate ring-3 protection-fault test. CI requires the demo and fault messages to appear on the QEMU serial port and the desktop to start afterward.
+
+The Files app now has an Apps sidebar shortcut. Double-click `APPS/HELLO.ELF` to actually execute this **native Bordify ABI** program; it is unrelated to Wine or macOS application support. `APPS/FAULT.ELF` demonstrates user-fault containment. This proof is **not production-secure**: one user address range, one process at a time, no scheduler, no user-level resource handles, no general ASLR, no W^X/NX enforcement, no proper ELF relocation/dynamic loading, and a simple fixed 32 MiB kernel heap. The currently present mapped upper identity ranges should be replaced with tighter kernel mappings. It is not suitable for arbitrary untrusted programs yet.
+
+**Remaining work:**
+
 
 - Design private per-process virtual address spaces, page-table management, user-mode (ring 3), guarded stacks and kernel/user memory boundaries.
 - Add a syscall entry mechanism, file handles, bounded copies from userspace, fault isolation, an exit/reap mechanism, and preemptive/cooperative scheduling as chosen.
@@ -77,4 +84,4 @@ Notes: executable/container prefix inspection examines only the bytes File Manag
 2. Host tests pass via `make test` in GitHub Actions.
 3. Double-clicking a known PE/Mach-O file in Files shows a truthful format/architecture/unsupported notice, without crashing.
 4. A deliberately truncated binary or invalid DMG metadata is reported as invalid/incomplete.
-5. Subsequent work starts with a protected user-process proof of concept, not direct execution of PE or Mach-O in kernel mode.
+5. QEMU serial confirms ring-3 ELF32 sample execution, isolated supervisor-memory page fault and successful return to the desktop. Further execution must build on this native process ABI; no direct PE or Mach-O kernel execution.
