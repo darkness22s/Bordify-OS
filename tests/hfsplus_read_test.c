@@ -97,6 +97,23 @@ int main(void) {
     assert(hfsplus_read_file(&mount,&file,payload,sizeof(payload)) &&
            !memcmp(payload,original,original_size));
 
+    /* A forged extent pointing into a free allocation block is rejected
+       even though the block is physically readable from the UDIF image. */
+    hfsplus_file_t free_extent=file;
+    free_extent.first_block=7;
+    assert(!hfsplus_read_file(&mount,&free_extent,payload,sizeof(payload)));
+    /* The actual file's allocated bit must remain set at read time. */
+    volume[4096] &= (uint8_t)~0x08u; /* block 4 */
+    assert(!hfsplus_read_file(&mount,&file,payload,sizeof(payload)));
+    assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
+    volume[4096] |= 0x08u;
+    assert(hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
+    /* Corrupted bitmap metadata fails mount without publication. */
+    volume[2*512+128]=0; volume[2*512+131]=7; /* bitmap block 7 */
+    assert(!hfsplus_mount_readonly(&mount,&map,read_bytes,&source));
+    volume[2*512+128]=0; volume[2*512+131]=1;
+    assert(hfsplus_mount_readonly(&mount,&map,read_bytes,&source));
+
     size_t leaf=2*4096+512;
     volume[leaf+8]=0; /* invalid B-tree leaf */
     assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
