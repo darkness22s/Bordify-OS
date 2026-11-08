@@ -4,7 +4,8 @@
 #include "types.h"
 
 /* Interpreter for a deliberately tiny ARM64 Mach-O subset.
- * There is NO Darwin runtime, dyld, Objective-C, Cocoa, or x64 execution.
+ * Darwin experimental syscall/ObjC bridging is opt-in, not full macOS,
+ * dyld, AppKit GUI, or x64 execution.
  * Guest bytes never execute directly on the host CPU.
  */
 #define A64_GUEST_BASE 0x100000000ULL
@@ -20,8 +21,14 @@ typedef struct {
     uint32_t unsupported_opcode;
 } a64_report_t;
 
+/* Original strict Bordify-only SVC ABI. */
 bool a64_macho_run(const uint8_t *file, size_t file_size,
                    uint8_t *guest, size_t guest_size,
                    a64_output_t output, void *context,
                    a64_report_t *report);
+/* Opt-in ARM64 Darwin write/exit/getpid + limited ObjC shim. */
+bool a64_macho_run_darwin(const uint8_t *file, size_t file_size,
+                          uint8_t *guest, size_t guest_size,
+                          a64_output_t output, void *context,
+                          a64_report_t *report);
 #endif
