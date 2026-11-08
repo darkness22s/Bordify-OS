@@ -1,0 +1,159 @@
+#include "hfsplus_read.h"
+#include "hfsplus_probe.h"
+
+/* HFS Plus Volume Format (TN1150): all on-disk integers big-endian.
+ * No dynamic allocations. All disk I/O goes through read-only UDIF.
+ */
+static uint16_t be16(const uint8_t *p) {
+    return ((uint16_t)p[0] << 8) | p[1];
+}
+static uint32_t be32(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | p[3];
+}
+static uint64_t be64(const uint8_t *p) {
+    return ((uint64_t)be32(p) << 32) | be32(p+4);
+}
+static bool range(size_t bound, size_t off, size_t size) {
+    return off <= bound && size <= bound-off;
+}
+static bool read_sector(const hfsplus_mount_t *m, uint64_t relative,
+                        uint8_t out[512]) {
+    if (relative >= m->map->sector_count) return false;
+    return udif_blkx_read_sector(m->map,m->map->sector_start+relative,
+                                  m->reader,m->context,out)==UDIF_IO_OK;
+}
+bool hfsplus_mount_readonly(hfsplus_mount_t *out,
+                             const udif_block_map_t *map,
+                             udif_reader_t reader, void *context) {
+    if (!out) return false;
+    out->map=0; out->reader=0; out->context=0;
+    if (!map || !reader || map->sector_count < 8) return false;
+    hfsplus_mount_t temp={0};
+    temp.map=map; temp.reader=reader; temp.context=context;
+    uint8_t sector[512];
+    if (!read_sector(&temp,2,sector)) return false;
+    hfsplus_volume_info_t volume;
+    if (!hfsplus_probe_header(sector,sizeof(sector),map->sector_count,&volume) ||
+        !volume.catalog_logical_size || volume.catalog_logical_size>65536u)
+        return false;
+    uint64_t catalog_sector;
+    if (!hfsplus_catalog_first_sector(&volume,map->sector_count,
+                                       &catalog_sector) ||
+        !read_sector(&temp,catalog_sector,sector)) return false;
+    hfsplus_catalog_info_t cat;
+    if (!hfsplus_catalog_probe(sector,sizeof(sector),
+                                volume.catalog_logical_size,&cat) ||
+        cat.tree_depth!=1 || cat.node_size!=512 || cat.root_node==0 ||
+        cat.leaf_records==0 || cat.leaf_records>16) return false;
+    uint64_t node_offset=(uint64_t)cat.root_node*cat.node_size;
+    if (node_offset>volume.catalog_logical_size ||
+        cat.node_size>volume.catalog_logical_size-node_offset)
+        return false;
+    /* Only a root leaf in the catalog's first extent is supported. */
+    uint64_t extent_bytes=(uint64_t)volume.catalog_extent_blocks *
+                           volume.block_size;
+    if (node_offset+512>extent_bytes) return false;
+    temp.catalog_start_sector=catalog_sector;
+    temp.catalog_bytes=volume.catalog_logical_size;
+    temp.allocation_block_bytes=volume.block_size;
+    temp.root_node=cat.root_node;
+    temp.node_bytes=cat.node_size;
+    temp.file_count=cat.leaf_records;
+    *out=temp;
+    return true;
+}
+bool hfsplus_find_root_file(const hfsplus_mount_t *m,
+                            const char *name, hfsplus_file_t *file) {
+    if (!m || !m->map || !m->reader || !name || !file) return false;
+    file->size=0; file->first_block=0;file->extent_blocks=0;
+    file->filename[0]=0;file->file_id=0;
+    size_t target_len=0;
+    while (target_len<31 && name[target_len]) ++target_len;
+    if (!target_len || target_len==31 || name[target_len]) return false;
+    uint8_t node[512];
+    uint64_t sector=m->catalog_start_sector +
+                     (uint64_t)m->root_node * (m->node_bytes/512u);
+    if (!read_sector(m,sector,node)) return false;
+    /* Leaf node descriptor: fLink,bLink,kind(-1),height(1),records,reserved. */
+    uint16_t count=be16(node+10);
+    if (node[8]!=0xff || node[9]!=1 || be16(node+12)!=0 ||
+        count==0 || count>16 || count!=m->file_count)
+        return false;
+    size_t table_start=512u-2u*((size_t)count+1u);
+    size_t previous=0;
+    for (unsigned i=0;i<count;++i) {
+        size_t start=be16(node+510u-2u*i);
+        size_t end=be16(node+508u-2u*i);
+        if (start<14u || start<previous || end<=start || end>table_start)
+            return false;
+        previous=end;
+        if (!range(end,start,8)) return false;
+        size_t key_len=be16(node+start);
+        uint32_t parent=be32(node+start+2);
+        size_t name_len=be16(node+start+6);
+        if (name_len>255 || key_len!=6u+2u*name_len ||
+            !range(end,start+2,key_len))
+            return false;
+        bool match=parent==2 && name_len==target_len;
+        if (match) {
+            for (size_t j=0;j<target_len;++j) {
+                uint8_t c=(uint8_t)name[j];
+                if (c<32 || c>126 ||
+                    be16(node+start+8u+2u*j)!=c) {
+                    match=false;break;
+                }
+            }
+        }
+        if (!match) continue;
+        /* HFSPlusCatalogFile begins immediately after even-length key. */
+        size_t record=start+2u+key_len;
+        if (!range(end,record,248) || be16(node+record)!=2) return false;
+        const uint8_t *fork=node+record+88; /* dataFork */
+        uint64_t logical=be64(fork);
+        uint32_t total=be32(fork+12);
+        uint32_t first=be32(fork+16);
+        uint32_t blocks=be32(fork+20);
+        if (!logical || logical>HFSPLUS_MAX_EXTRACT ||
+            !total || !blocks || blocks>total || first==0 ||
+            blocks>(UINT32_MAX-first) ||
+            logical>(uint64_t)blocks*m->allocation_block_bytes ||
+            (uint64_t)(first+blocks)*
+                (m->allocation_block_bytes/512u)>m->map->sector_count)
+            return false;
+        file->file_id=be32(node+record+8);
+        if (file->file_id<16) return false;
+        file->first_block=first;
+        file->extent_blocks=blocks;
+        file->size=(uint32_t)logical;
+        for(size_t j=0;j<=target_len;++j)
+            file->filename[j]=name[j];
+        return true;
+    }
+    return false;
+}
+bool hfsplus_read_file(const hfsplus_mount_t *m,
+                        const hfsplus_file_t *file,
+                        uint8_t *out, size_t cap) {
+    if (!m || !m->map || !m->reader || !file || !out ||
+        !file->size || file->size>HFSPLUS_MAX_EXTRACT ||
+        file->size>cap || !file->extent_blocks ||
+        !m->allocation_block_bytes ||
+        (uint64_t)file->size>
+            (uint64_t)file->extent_blocks*m->allocation_block_bytes)
+        return false;
+    uint64_t base=(uint64_t)file->first_block *
+                   (m->allocation_block_bytes/512u);
+    uint64_t sectors=((uint64_t)file->size+511u)/512u;
+    if (base>=m->map->sector_count ||
+        sectors>m->map->sector_count-base) return false;
+    uint8_t sector[512];
+    uint32_t written=0;
+    for (uint64_t i=0;i<sectors;++i) {
+        if (!read_sector(m,base+i,sector)) return false;
+        unsigned take=file->size-written<512u ? file->size-written : 512u;
+        for (unsigned j=0;j<take;++j) out[written+j]=sector[j];
+        written+=take;
+    }
+    return written==file->size;
+}
