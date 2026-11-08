@@ -63,6 +63,17 @@ int main(void) {
     assert(hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     assert(!hfsplus_read_file(&mount,&file,payload,file.size-1));
     assert(hfsplus_read_file(&mount,&file,payload,sizeof(payload)));
+    /* Do not trust caller-supplied fork metadata, even if a sector
+       happens to be accessible in the backing UDIF partition. */
+    hfsplus_file_t forged=file;
+    forged.first_block=0;
+    assert(!hfsplus_read_file(&mount,&forged,payload,sizeof(payload)));
+    forged=file;
+    forged.first_block=mount.total_allocation_blocks;
+    assert(!hfsplus_read_file(&mount,&forged,payload,sizeof(payload)));
+    forged=file;
+    forged.extent_blocks=mount.total_allocation_blocks;
+    assert(!hfsplus_read_file(&mount,&forged,payload,sizeof(payload)));
 
     uint8_t original[4096];
     f=fopen("build/apps/darwin.mch","rb");assert(f);
