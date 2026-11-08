@@ -71,6 +71,20 @@ static bool installed_commit(const uint8_t *data, size_t bytes, void *ctx) {
                        installed_verify,(uint32_t)sizeof(installed_verify));
     return got==(int)bytes && kmemcmp(installed_verify,data,bytes)==0;
 }
+int compat_win64_installed_run(void) {
+    uint32_t bytes=load_demo("APP64.EXE");
+    pe64_report_t launched;
+    if (!bytes || !pe64_vm_run(file_data,bytes,x64_memory,
+                               sizeof(x64_memory),serial_bytes,
+                               NULLPTR,&launched) ||
+        !launched.finished || launched.exit_code!=0) {
+        kprintf("[win64-install] installed AMD64 application failed\n");
+        return -1;
+    }
+    kprintf("[win64-install] installed AMD64 application launched; exit %d\n",
+            launched.exit_code);
+    return 0;
+}
 int compat_win64_installer_run(void) {
     uint32_t bytes=load_demo("SETUP64.EXE");
     pe64_report_t installed;
@@ -85,19 +99,9 @@ int compat_win64_installer_run(void) {
     }
     kprintf("[win64-install] PE32+ installer committed APP64.EXE (%u bytes)\n",
             installed.installed_bytes);
-    bytes=load_demo("APP64.EXE");
-    pe64_report_t launched;
-    if (!bytes || !pe64_vm_run(file_data,bytes,x64_memory,
-                                sizeof(x64_memory),serial_bytes,
-                                NULLPTR,&launched) ||
-        !launched.finished || launched.exit_code!=0) {
-        kprintf("[win64-install] installed AMD64 executable failed\n");
-        return -1;
-    }
-    kprintf("[win64-install] installed AMD64 application launched; exit %d\n",
-            launched.exit_code);
-    return 0;
+    return compat_win64_installed_run();
 }
+
 void compat_vm_demos(void) {
     compat_win64_demo_run();
     compat_win64_installer_run();
