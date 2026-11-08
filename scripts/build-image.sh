@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL="$ROOT/build/bordify.elf"
 DEMO="$ROOT/build/apps/hello.elf"
 FAULT="$ROOT/build/apps/fault.elf"
+WIN32="$ROOT/build/apps/winhello.exe"
 DIST="$ROOT/dist"
 IMG="$DIST/Bordify-OS.img"
 VHD="$DIST/Bordify-OS.vhd"
@@ -12,8 +13,8 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ]; then
-    echo "Missing kernel or demo ELF32; run make first." >&2
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ]; then
+    echo "Missing kernel or demo executables; run make first." >&2
     exit 1
 fi
 for asset in WELCOME.TXT NOTES.TXT DOCS/README.TXT WEB/HOME.HTM WEB/GUIDE.HTM WEB/ABOUT.HTM SYSTEM/SETTINGS.CFG; do
@@ -69,6 +70,7 @@ MOUNTED=1
 "${SUDO[@]}" cp "$KERNEL" "$MNT/boot/bordify.elf"
 "${SUDO[@]}" cp "$DEMO" "$MNT/APPS/HELLO.ELF"
 "${SUDO[@]}" cp "$FAULT" "$MNT/APPS/FAULT.ELF"
+"${SUDO[@]}" cp "$WIN32" "$MNT/APPS/WINHELLO.EXE"
 "${SUDO[@]}" cp -r --no-preserve=mode,ownership,timestamps "$ROOT/assets/fs/." "$MNT/"
 
 "${SUDO[@]}" grub-install \
