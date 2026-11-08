@@ -5,7 +5,8 @@
 
 /*
  * A narrow, read-only UDIF ("mish") block-map reader.
- * Supports raw and zero/unused sectors; compressed blocks return UNSUPPORTED.
+ * Supports raw, zero/unused and bounded zlib-compressed sectors. Other
+ * compression types remain UNSUPPORTED; this is not a general DMG mount.
  * This is not yet an APFS/HFS+ filesystem or a DMG installer.
  */
 #define UDIF_BLKX_MAX_RUNS 128u
