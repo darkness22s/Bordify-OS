@@ -236,7 +236,7 @@ static void files_inspect_dmg_blocks(const fat_entry_t *entry,
         udif_blkx_read_sector(&blocks, blocks.sector_start,
                               files_read_dmg_bytes, &file, sector);
     const char *status = result == UDIF_IO_OK ? "Read-only sector access OK" :
-                         result == UDIF_IO_UNSUPPORTED ? "Compressed sector: unsupported" :
+                         result == UDIF_IO_UNSUPPORTED ? "Compression codec/size not supported" :
                          "Sector read failed";
     size_t used = kstrlen(fs.viewer_text);
     if (used < sizeof(fs.viewer_text)) {
