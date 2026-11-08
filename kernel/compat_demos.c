@@ -56,6 +56,24 @@ int compat_darwin_demo_run(void) {
     kprintf("[darwin] ARM64 compatibility bridge rejected test executable\n");
     return -1;
 }
+/* Independently clang-assembled (not generated hand-encoded) ARM64 Mach-O.
+ * Uses real AArch64 arithmetic, flags, conditional branches, BL/RET,
+ * pair-stack and LDR/STR while Darwin output remains test-only.
+ */
+int compat_arm64_workload_run(void) {
+    uint32_t length=load_demo("ARMWORK.MCH");
+    a64_report_t result;
+    if (length && a64_macho_run_darwin(file_data,length,
+                                       arm_memory,sizeof(arm_memory),
+                                       serial_bytes,NULLPTR,&result) &&
+        result.finished && result.exit_code==0 && result.steps>45) {
+        kprintf("[arm64] clang-assembled Mach-O arithmetic, branches and stack passed; %u steps, exit %d\n",
+                result.steps,result.exit_code);
+        return result.exit_code;
+    }
+    kprintf("[arm64] extended clang-assembled Mach-O rejected or failed\n");
+    return -1;
+}
 /* Only this audited setup may commit C:\\APP64.EXE to /APPS/APP64.EXE.
  * Never expose a general guest-controlled FAT16 path or kernel file handle. */
 static uint8_t installed_verify[8192];
@@ -107,5 +125,6 @@ void compat_vm_demos(void) {
     compat_win64_demo_run();
     compat_win64_installer_run();
     compat_darwin_demo_run();
+    compat_arm64_workload_run();
     dmg_install_demo();
 }
