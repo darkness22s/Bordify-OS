@@ -27,6 +27,10 @@ int main(void) {
     assert(info.finished && info.exit_code==0 && info.imports==3);
     const char *expected=
         "BORDIFY WIN64: PE32+ x64 WriteFile interpreted on x86 kernel\r\n";
+    /* The API must set lpNumberOfBytesWritten in guest address space. */
+    assert(memory[0x1380]==strlen(expected) &&
+           memory[0x1381]==0 && memory[0x1382]==0 &&
+           memory[0x1383]==0);
     assert(written==strlen(expected));
     assert(!memcmp(transcript,expected,written));
 
@@ -47,6 +51,10 @@ int main(void) {
     binary[0x4a2]='X'; /* WriteFile is at RVA 12a0 + hint 2 */
     assert(!pe64_vm_run(binary,size,memory,sizeof(memory),emit,NULL,&info));
     binary[0x4a2]='W';
+    /* Without a Win64 shadow-space prologue, the import call must fail. */
+    binary[0x200]=0x90;
+    assert(!pe64_vm_run(binary,size,memory,sizeof(memory),emit,NULL,&info));
+    binary[0x200]=0x48;
     binary[0x200]=0x0f;binary[0x201]=0x0b;
     assert(!pe64_vm_run(binary,size,memory,sizeof(memory),emit,NULL,&info));
     assert(info.rejected_opcode!=0);
