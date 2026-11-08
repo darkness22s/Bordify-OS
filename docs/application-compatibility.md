@@ -10,7 +10,7 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 | Requested feature | Verified now | Not yet working |
 | --- | --- | --- |
 | Windows x64 EXE installers | 🟢 **Audited built-in installer fixture only:** real PE32+ AMD64 setup invokes `CreateFileA/WriteFile/CloseHandle`, writes a second PE32+ app onto FAT16, which Bordify reads and runs; GitHub Actions verifies persistence byte-for-byte | ⚠️ **General installer feature is still incomplete:** downloaded third-party x64 EXEs, NSIS/Inno/MSI setup, GUI, DLLs, broad Win32 APIs, arbitrary filesystem paths, production isolation, native 64-bit execution |
-| macOS DMG mounting and installation | DMG footer + XML blkx maps; raw/zero/zlib sectors and read-only HFS+ volume and catalog B-tree header metadata from FAT16 disk | Other compression codecs, HFS+ catalog record traversal, APFS, full filesystem mounting, PKG/.app installation |
+| macOS DMG mounting and installation | DMG footer + XML blkx maps; raw/zero/zlib sectors and read-only HFS+ volume and catalog B-tree header metadata from FAT16 disk | Other compression codecs, general HFS+ catalog traversal, APFS, full filesystem mounting, PKG/.app installation |
 | Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
 | Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
 | macOS Darwin/Cocoa runtime | 🟡 ARM64 Mach-O demo calls BSD `write/exit/getpid` subset and experimental ObjC `objc_getClass/objc_msgSend` shim for `NSString` and `NSApplication` methods | Real dyld/libobjc symbol linkage, broader libSystem/Objective-C/Swift, Foundation/AppKit GUI, and actual macOS app compatibility |
@@ -46,6 +46,12 @@ Notes: executable/container prefix inspection examines only the bytes File Manag
 - **Windows x64 EXE installer:** Beyond PE32+ recognition, needs long-mode/64-bit processes, 64-bit Windows APIs, dynamic DLL loading, registry semantics, installer file/shortcut operations and a target app runtime. Self-extractors such as NSIS/Inno/InstallShield are different formats layered atop PE; compatibility must be tested individually.
 - **MSI:** OLE/CFB signature alone is not proof of a Windows Installer database; use the MSI directory/stream structures to validate and install under a Windows Installer-compatible runtime.
 - **Hardware:** Plan a x86-64 kernel and 64-bit boot path while keeping the current 32-bit boot image working until a tested replacement exists.
+
+### Stage 0.9 — Bounded HFS+ root-file extraction and extent validation (under CI verification)
+
+A narrow read-only `hfsplus_read` path can locate a root-directory ASCII-named file in a **single 512-byte catalog leaf** and read its first contiguous data-fork extent through UDIF. The generated `MOUNT.DMG` fixture contains an actual catalog leaf pointing to a tiny generated `DARWIN.MCH` Mach-O payload, rather than only a catalog header. This is a synthetic, constrained HFS+ sample, **not** a general HFS+ mount, APFS parser, or macOS installer.
+
+The latest hardening stores the validated HFS+ volume allocation-block count in the mount and rejects file extents that exceed it, including caller-forged first blocks or extent lengths even when raw backing sectors are otherwise accessible. Unit tests cover forged file extents, malformed catalog offsets, invalid leaf records, invalid root parent IDs, corrupted filesystem signatures and read errors. Catalog overflow extents, multi-node B-trees, non-ASCII names, symlinks, compression and larger files remain unsupported. Do not execute any extracted payload with kernel privilege.
 
 ### Stage 0.8 — Bounded HFS+ catalog B-tree header probing (verified)
 
