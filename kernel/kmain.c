@@ -22,6 +22,9 @@
 #include "udif_demo.h"
 #include "a64_demo.h"
 #include "compat_demos.h"
+#ifdef BORDIFY_CHROME_PROBE
+#include "chrome_trial.h"
+#endif
 
 extern uint8_t kernel_end;
 
@@ -109,6 +112,10 @@ void kernel_main(uint32_t mb_info_address) {
     }
 
     compat_vm_demos();
+
+#ifdef BORDIFY_CHROME_PROBE
+    chrome_trial_run();
+#endif
 
     gui_init();
     kprintf("[kernel] starting desktop\n");
