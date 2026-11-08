@@ -30,6 +30,8 @@ bool darwin_objc_call(uint64_t op, uint64_t r[31],
         if (equals(value,n,"NSString")) r[0]=DARWIN_CLASS_NSSTRING;
         else if (equals(value,n,"NSApplication"))
             r[0]=DARWIN_CLASS_NSAPPLICATION;
+        else if (equals(value,n,"NSWindow"))
+            r[0]=DARWIN_CLASS_NSWINDOW;
         else return false;
         return true;
     }
@@ -56,20 +58,74 @@ bool darwin_objc_call(uint64_t op, uint64_t r[31],
         r[0]=DARWIN_OBJECT_STRING;
         return true;
     }
-    if (receiver==DARWIN_OBJECT_STRING && state->string_created &&
-        equals(value,n,"UTF8String")) {
-        r[0]=base+guest_size-512;
+    if (receiver==DARWIN_OBJECT_STRING && state->string_created) {
+        if (equals(value,n,"UTF8String")) {
+            r[0]=base+guest_size-512;
+            return true;
+        }
+        if (equals(value,n,"length")) {
+            r[0]=(uint64_t)state->string_length;
+            return true;
+        }
+    }
+    if (receiver==DARWIN_CLASS_NSWINDOW && equals(value,n,"new")) {
+        state->window_created=true;
+        state->window_visible=false;
+        state->window_title_set=false;
+        state->window_title[0]=0;
+        r[0]=DARWIN_OBJECT_WINDOW;
         return true;
+    }
+    if (receiver==DARWIN_OBJECT_WINDOW && state->window_created) {
+        if (equals(value,n,"setTitle:")) {
+            if (r[2]!=DARWIN_OBJECT_STRING || !state->string_created)
+                return false;
+            for(size_t i=0;i<=state->string_length;++i)
+                state->window_title[i]=state->string_data[i];
+            state->window_title_set=true;
+            r[0]=receiver;
+            return true;
+        }
+        if (equals(value,n,"makeKeyAndOrderFront:")) {
+            if (!state->window_title_set) return false;
+            state->window_visible=true;
+            r[0]=receiver;
+            return true;
+        }
+        if (equals(value,n,"orderOut:")) {
+            state->window_visible=false;
+            r[0]=receiver;
+            return true;
+        }
+        if (equals(value,n,"isVisible")) {
+            r[0]=state->window_visible ? 1u : 0u;
+            return true;
+        }
     }
     if (receiver==DARWIN_CLASS_NSAPPLICATION &&
         equals(value,n,"sharedApplication")) {
         r[0]=DARWIN_OBJECT_APPLICATION;
         return true;
     }
-    if (receiver==DARWIN_OBJECT_APPLICATION &&
-        equals(value,n,"isRunning")) {
-        r[0]=0; /* no AppKit event loop yet */
-        return true;
+    if (receiver==DARWIN_OBJECT_APPLICATION) {
+        if (equals(value,n,"isRunning")) {
+            r[0]=state->application_running ? 1u : 0u;
+            return true;
+        }
+        if (equals(value,n,"run")) {
+            /* Nonblocking modeled lifecycle: no real AppKit event loop. */
+            state->application_running=true;
+            state->application_started=true;
+            r[0]=receiver;
+            return true;
+        }
+        if (equals(value,n,"terminate:")) {
+            if (!state->application_running) return false;
+            state->application_running=false;
+            state->application_terminated=true;
+            r[0]=receiver;
+            return true;
+        }
     }
     return false; /* fail closed on unavailable framework selectors */
 }
