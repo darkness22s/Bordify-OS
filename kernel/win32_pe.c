@@ -157,7 +157,9 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
         !fits(file_size, 0, headers_size)) return false;
 
     size_t sections = opt + optional_size;
-    if (!fits(file_size, sections, (size_t)section_count * 40u)) return false;
+    if (!fits(file_size, sections, (size_t)section_count * 40u) ||
+        !fits(headers_size, sections, (size_t)section_count * 40u))
+        return false;
     bool executable_entry = false;
 
     /* Validate complete mapping before copying untrusted sections. */
