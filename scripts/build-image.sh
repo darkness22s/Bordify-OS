@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL="$ROOT/build/bordify.elf"
+DEMO="$ROOT/build/apps/hello.elf"
 DIST="$ROOT/dist"
 IMG="$DIST/Bordify-OS.img"
 VHD="$DIST/Bordify-OS.vhd"
@@ -10,8 +11,8 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ]; then
-    echo "Missing $KERNEL; run make first." >&2
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ]; then
+    echo "Missing kernel or demo ELF32; run make first." >&2
     exit 1
 fi
 for asset in WELCOME.TXT NOTES.TXT DOCS/README.TXT WEB/HOME.HTM WEB/GUIDE.HTM WEB/ABOUT.HTM SYSTEM/SETTINGS.CFG; do
@@ -62,9 +63,10 @@ fi
 "${SUDO[@]}" mount "${LOOP}p1" "$MNT"
 MOUNTED=1
 
-"${SUDO[@]}" mkdir -p "$MNT/boot/grub" "$MNT/WEB" "$MNT/DOCS" "$MNT/SYSTEM"
+"${SUDO[@]}" mkdir -p "$MNT/boot/grub" "$MNT/WEB" "$MNT/DOCS" "$MNT/SYSTEM" "$MNT/APPS"
 "${SUDO[@]}" cp "$ROOT/boot/grub.cfg" "$MNT/boot/grub/grub.cfg"
 "${SUDO[@]}" cp "$KERNEL" "$MNT/boot/bordify.elf"
+"${SUDO[@]}" cp "$DEMO" "$MNT/APPS/HELLO.ELF"
 "${SUDO[@]}" cp -r --no-preserve=mode,ownership,timestamps "$ROOT/assets/fs/." "$MNT/"
 
 "${SUDO[@]}" grub-install \
