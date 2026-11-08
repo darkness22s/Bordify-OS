@@ -118,6 +118,13 @@ int main(void) {
     volume[leaf+8]=0; /* invalid B-tree leaf */
     assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     volume[leaf+8]=0xff;
+    /* A depth-one root leaf must not point to sibling leaves. */
+    be32set(volume+leaf,2);
+    assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
+    be32set(volume+leaf,0);
+    be32set(volume+leaf+4,2);
+    assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
+    be32set(volume+leaf+4,0);
     volume[leaf+511]=0; /* invalid record offset (low byte) */
     assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     volume[leaf+511]=14;
@@ -130,6 +137,12 @@ int main(void) {
     be32set(volume+fork+16,99); /* first extent outside image */
     assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     be32set(volume+fork+16,4);
+    /* Fragmented forks need an extents-overflow B-tree. Do not return
+       only the first extent and silently truncate the logical file. */
+    be32set(volume+fork+12,2);
+    assert(!hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
+    be32set(volume+fork+12,1);
+    assert(hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     volume[2*512]=0; /* destroy HFS+ signature */
     assert(!hfsplus_mount_readonly(&mount,&map,read_bytes,&source));
 
