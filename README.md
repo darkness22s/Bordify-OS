@@ -46,16 +46,27 @@ a small **interpreted** Apple Silicon Mach-O demonstration
 (`APPS/ARMHELLO.MCH`), and read-only raw/zero and bounded zlib-compressed UDIF sector
 access using synthetic disk images (`APPS/DMGDEMO.DMG`, `APPS/ZDMG.DMG`).
 These demonstrations are checked by
-QEMU CI. The ARM64 guest demo uses a **custom test ABI**, not Darwin.
+QEMU CI. The original ARM64 guest demo uses a **custom test ABI**, not Darwin.
+
+The experimental branch now also includes **two 64-bit compatibility proofs**:
+- `APPS/WIN64.EXE`: a genuine x86-64 PE32+ console image, interpreted
+  (not executed natively) with a bounded AMD64 instruction subset and
+  Microsoft x64 ABI bridges for `GetStdHandle`, `WriteFile`, `ExitProcess`.
+- `APPS/DARWIN.MCH`: a genuine ARM64 Mach-O test using a subset of
+  Darwin-style BSD syscalls and a test-only Objective-C bridge handling
+  `NSString` and `NSApplication` methods, not actual dyld/libobjc/Cocoa.
+
+Both demos have host-side tests and QEMU boot checks. They can also be
+launched from the Files app's Apps directory.
 
 The development branch also probes **HFS+/HFSX volume and catalog B-tree headers** inside
 compressed DMGs, including catalog-extent metadata, without mounting
 or reading an actual HFS+ filesystem. `APPS/HFSPLUS.DMG` is a synthetic
 header fixture (including a synthetic B-tree header), not a usable macOS installation image.
 
-This **does not** run Windows x64 installers or arbitrary .exe files,
-mount or install real macOS DMGs, run real Apple Silicon apps, or supply
-Darwin/Cocoa. Untrusted applications must not be launched by this
+This **does not** run real Windows x64 installers, arbitrary .exe files,
+mount or install real macOS DMGs, execute general Apple Silicon applications,
+or implement full Darwin/Cocoa frameworks. Untrusted applications must not be launched by this
 early-stage kernel. [Details and compatibility gates](docs/application-compatibility.md).
 
 ## Download and run
