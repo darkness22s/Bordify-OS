@@ -63,11 +63,21 @@ static bool win32_save_file(const uint8_t *data,size_t count,void *context) {
     (void)context;
     fat_entry_t apps,entry;
     if (!fat16_mounted() || !fat16_find(0,"APPS",&apps) ||
-        !(apps.attr & FAT_ATTR_DIRECTORY) ||
-        fat16_write(apps.cluster,"WIN32.TXT",data,(uint32_t)count)!=(int)count ||
-        !fat16_find(apps.cluster,"WIN32.TXT",&entry) ||
-        entry.size!=(uint32_t)count) return false;
-    return true;
+        !(apps.attr & FAT_ATTR_DIRECTORY)) {
+#ifdef BORDIFY_CHROME_PROBE
+        kprintf("[win32-trace] save preconditions rejected\n");
+#endif
+        return false;
+    }
+    uint32_t free_before=fat16_free_clusters();
+    int stored=fat16_write(apps.cluster,"WIN32.TXT",data,(uint32_t)count);
+    bool found=fat16_find(apps.cluster,"WIN32.TXT",&entry);
+#ifdef BORDIFY_CHROME_PROBE
+    kprintf("[win32-trace] save requested=%u stored=%d found=%u size=%u free_before=%u free_after=%u\n",
+            (unsigned)count,stored,found ? 1u : 0u,
+            found ? entry.size : 0u,free_before,fat16_free_clusters());
+#endif
+    return stored==(int)count && found && entry.size==(uint32_t)count;
 }
 static uint32_t *page_directory;
 static uint32_t *user_page_table;
