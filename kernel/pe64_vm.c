@@ -175,7 +175,9 @@ static bool pe64_vm_run_internal(const uint8_t *file, size_t length,
     if (!stage(file,length,memory,memory_bytes,&ip,&report->imports))
         return false;
     uint64_t rcx=0,rdx=0,r8=0,r9=0,rax=0,rbx=0;
-    uint64_t rsp=PE64_GUEST_BASE+STACK_RVA;
+    /* Microsoft x64 function entry: RSP is 8 mod 16; callers must
+     * reserve 32 bytes of home space before Win64 imports. */
+    uint64_t rsp=PE64_GUEST_BASE+STACK_RVA-8u;
     for (uint32_t step=0;step<PE64_MAX_STEPS;++step) {
         if (!fits(memory_bytes,ip,2) || ip >= IMAGE_LIMIT) return false;
         uint8_t *p=memory+ip;
@@ -205,6 +207,13 @@ static bool pe64_vm_run_internal(const uint8_t *file, size_t length,
         }
         if (fits(memory_bytes,ip,6) && p[0]==0x41 && p[1]==0xb8) {
             r8=u32(p+2);ip+=6;continue; /* mov r8d,imm32 */
+        }
+        /* LEA R9,[RIP+disp32], 64-bit lpNumberOfBytesWritten. */
+        if (fits(memory_bytes,ip,7) &&
+            p[0]==0x4c && p[1]==0x8d && p[2]==0x0d) {
+            int64_t addr=(int64_t)(PE64_GUEST_BASE+ip+7)+(int32_t)u32(p+3);
+            if (addr<(int64_t)PE64_GUEST_BASE) return false;
+            r9=(uint64_t)addr;ip+=7;continue;
         }
         if (fits(memory_bytes,ip,3) &&
             p[0]==0x45 && p[1]==0x31 && p[2]==0xc9) {
@@ -252,13 +261,19 @@ static bool pe64_vm_run_internal(const uint8_t *file, size_t length,
             if (target<(int64_t)PE64_GUEST_BASE ||
                 !off64((uint64_t)target,memory_bytes,8,&rva)) return false;
             uint64_t api=u64(memory+rva);
+            /* Microsoft x64 calls require 16-byte alignment and 32 bytes
+             * of shadow space, even when the guest API uses only registers. */
+            if ((rsp & 15u)!=0u ||
+                !off64(rsp,memory_bytes,40,&rva)) return false;
             if (api==STUB_BASE+1) {
                 rax=(rcx==(uint64_t)(int64_t)-11) ? STDOUT_HANDLE : 0;
             } else if (api==STUB_BASE+2) { /* WriteFile */
-                size_t data_offset, stack_offset;
-                if (!off64(rdx,memory_bytes,(size_t)r8,&data_offset) ||
+                size_t data_offset, stack_offset, written_offset;
+                if (r8>MAX_INSTALL_BYTES ||
+                    !off64(rdx,memory_bytes,(size_t)r8,&data_offset) ||
                     !off64(rsp+32,memory_bytes,4,&stack_offset) ||
-                    r9!=0 || u32(memory+stack_offset)!=0) return false;
+                    !off64(r9,memory_bytes,4,&written_offset) ||
+                    u32(memory+stack_offset)!=0) return false;
                 if (rcx==STDOUT_HANDLE) {
                     if (r8>256) return false;
                     output(memory+data_offset,(size_t)r8,ctx);
@@ -270,6 +285,11 @@ static bool pe64_vm_run_internal(const uint8_t *file, size_t length,
                             memory[data_offset+k];
                     install_state.length+=(size_t)r8;
                 } else return false;
+                /* Synchronous Win64 WriteFile writes lpNumberOfBytesWritten
+                 * on success, rather than silently ignoring the parameter. */
+                uint32_t written=(uint32_t)r8;
+                for(unsigned j=0;j<4;++j)
+                    memory[written_offset+j]=(uint8_t)(written>>(8u*j));
                 rax=1;
             } else if (api==STUB_BASE+3) {
                 if (commit && (!install_state.committed ||
