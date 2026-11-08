@@ -37,7 +37,11 @@ bool package_inspect_dmg_trailer(const void *trailer, size_t length,
     if (p[0] != 'k' || p[1] != 'o' || p[2] != 'l' || p[3] != 'y')
         return false;
     out->format = PACKAGE_DMG_UDIF;
-    if (length != 512 || file_size < 512) return true;
+    /* Incomplete 'koly' signatures are NOT recognized disk images. */
+    if (length != 512 || file_size < 512) {
+        reset(out);
+        return false;
+    }
 
     uint32_t version = be32(p + 4);
     uint32_t header_size = be32(p + 8);
