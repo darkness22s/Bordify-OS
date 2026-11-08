@@ -4,6 +4,7 @@
 #include "fat16.h"
 #include "serial.h"
 #include "printf.h"
+#include "string.h"
 
 /* Only included audited sample binaries are run. Both CPUs are interpreted,
  * not executed as arbitrary ring-0 or ring-3 native host code. */
@@ -54,7 +55,51 @@ int compat_darwin_demo_run(void) {
     kprintf("[darwin] ARM64 compatibility bridge rejected test executable\n");
     return -1;
 }
+/* Only this audited setup may commit C:\\APP64.EXE to /APPS/APP64.EXE.
+ * Never expose a general guest-controlled FAT16 path or kernel file handle. */
+static uint8_t installed_verify[8192];
+static bool installed_commit(const uint8_t *data, size_t bytes, void *ctx) {
+    (void)ctx;
+    fat_entry_t apps;
+    if (!fat16_mounted() || !data || bytes<512 ||
+        bytes>sizeof(installed_verify) ||
+        !fat16_find(0,"APPS",&apps) ||
+        !(apps.attr & FAT_ATTR_DIRECTORY) ||
+        fat16_write(apps.cluster,"APP64.EXE",data,(uint32_t)bytes) !=
+          (int)bytes) return false;
+    int got=fat16_read(apps.cluster,"APP64.EXE",
+                       installed_verify,(uint32_t)sizeof(installed_verify));
+    return got==(int)bytes && kmemcmp(installed_verify,data,bytes)==0;
+}
+int compat_win64_installer_run(void) {
+    uint32_t bytes=load_demo("SETUP64.EXE");
+    pe64_report_t installed;
+    if (!bytes ||
+        !pe64_vm_run_install(file_data,bytes,x64_memory,sizeof(x64_memory),
+                            serial_bytes,NULLPTR,installed_commit,NULLPTR,
+                            &installed) ||
+        !installed.finished || installed.exit_code!=0 ||
+        installed.installed_bytes!=2048u) {
+        kprintf("[win64-install] x64 setup rejected or installation failed\n");
+        return -1;
+    }
+    kprintf("[win64-install] PE32+ installer committed APP64.EXE (%u bytes)\n",
+            installed.installed_bytes);
+    bytes=load_demo("APP64.EXE");
+    pe64_report_t launched;
+    if (!bytes || !pe64_vm_run(file_data,bytes,x64_memory,
+                                sizeof(x64_memory),serial_bytes,
+                                NULLPTR,&launched) ||
+        !launched.finished || launched.exit_code!=0) {
+        kprintf("[win64-install] installed AMD64 executable failed\n");
+        return -1;
+    }
+    kprintf("[win64-install] installed AMD64 application launched; exit %d\n",
+            launched.exit_code);
+    return 0;
+}
 void compat_vm_demos(void) {
     compat_win64_demo_run();
+    compat_win64_installer_run();
     compat_darwin_demo_run();
 }
