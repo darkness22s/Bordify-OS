@@ -6,6 +6,8 @@ KERNEL="$ROOT/build/bordify.elf"
 DEMO="$ROOT/build/apps/hello.elf"
 FAULT="$ROOT/build/apps/fault.elf"
 WIN32="$ROOT/build/apps/winhello.exe"
+WIN64="$ROOT/build/apps/win64demo.exe"
+DARWIN="$ROOT/build/apps/darwin.mch"
 DMG="$ROOT/build/apps/dmgdemo.dmg"
 ZDMG="$ROOT/build/apps/zdmg.dmg"
 HFSPLUS="$ROOT/build/apps/hfsplus.dmg"
@@ -17,7 +19,7 @@ MNT="$(mktemp -d)"
 LOOP=""
 MOUNTED=0
 
-if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$HFSPLUS" ] || [ ! -f "$ARM" ]; then
+if [ ! -f "$KERNEL" ] || [ ! -f "$DEMO" ] || [ ! -f "$FAULT" ] || [ ! -f "$WIN32" ] || [ ! -f "$WIN64" ] || [ ! -f "$DARWIN" ] || [ ! -f "$DMG" ] || [ ! -f "$ZDMG" ] || [ ! -f "$HFSPLUS" ] || [ ! -f "$ARM" ]; then
     echo "Missing kernel or demo executables; run make first." >&2
     exit 1
 fi
@@ -75,6 +77,8 @@ MOUNTED=1
 "${SUDO[@]}" cp "$DEMO" "$MNT/APPS/HELLO.ELF"
 "${SUDO[@]}" cp "$FAULT" "$MNT/APPS/FAULT.ELF"
 "${SUDO[@]}" cp "$WIN32" "$MNT/APPS/WINHELLO.EXE"
+"${SUDO[@]}" cp "$WIN64" "$MNT/APPS/WIN64.EXE"
+"${SUDO[@]}" cp "$DARWIN" "$MNT/APPS/DARWIN.MCH"
 "${SUDO[@]}" cp "$DMG" "$MNT/APPS/DMGDEMO.DMG"
 "${SUDO[@]}" cp "$ZDMG" "$MNT/APPS/ZDMG.DMG"
 "${SUDO[@]}" cp "$HFSPLUS" "$MNT/APPS/HFSPLUS.DMG"
