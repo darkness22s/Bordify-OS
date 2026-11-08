@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32/x86 PE32 demos, experimental x64 PE32+ console interpreter and a restricted real file-writing PE32+ installer fixture, ARM64 Mach-O and Darwin/ObjC shims, and DMG/HFS+ probes verified by QEMU**. One synthetic x64 setup can install and launch its embedded app from FAT16, but arbitrary third-party Windows x64 installers, macOS applications, DMG installation and full Darwin/Cocoa frameworks are **NOT** supported.
+Status: **native ELF32/x86 PE32 demos; a restricted PE32+ x64 installer fixture; an experimental ARM64/Darwin/ObjC interpreter; and a read-only zlib UDIF/HFS+ mount with verified file extraction and FAT16 installation**. A generated HFS+ DMG can deliver an ARM64 Mach-O program which Bordify launches and persists to disk. **Arbitrary third-party DMGs, APFS, PKG/.app installation, general macOS compatibility and full Darwin/Cocoa are NOT supported.**
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -10,7 +10,7 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 | Requested feature | Verified now | Not yet working |
 | --- | --- | --- |
 | Windows x64 EXE installers | 🟢 **Audited built-in installer fixture only:** real PE32+ AMD64 setup invokes `CreateFileA/WriteFile/CloseHandle`, writes a second PE32+ app onto FAT16, which Bordify reads and runs; GitHub Actions verifies persistence byte-for-byte | ⚠️ **General installer feature is still incomplete:** downloaded third-party x64 EXEs, NSIS/Inno/MSI setup, GUI, DLLs, broad Win32 APIs, arbitrary filesystem paths, production isolation, native 64-bit execution |
-| macOS DMG mounting and installation | DMG footer + XML blkx maps; raw/zero/zlib sectors and read-only HFS+ volume and catalog B-tree header metadata from FAT16 disk | Other compression codecs, general HFS+ catalog traversal, APFS, full filesystem mounting, PKG/.app installation |
+| macOS DMG mounting and installation | 🟢 **Audited fixture only:** zlib UDIF read-only HFS+ mount, root catalog lookup, data-fork extraction, persistent FAT16 installation and ARM64 Mach-O execution pass QEMU | ⚠️ **General DMG installation remains incomplete:** unsupported codecs, APFS, general HFS+ B-trees/extents and partitions, `.app` bundles, PKG scripts, arbitrary third-party installers |
 | Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
 | Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
 | macOS Darwin/Cocoa runtime | 🟡 ARM64 Mach-O demo calls BSD `write/exit/getpid` subset and experimental ObjC `objc_getClass/objc_msgSend` shim for `NSString` and `NSApplication` methods | Real dyld/libobjc symbol linkage, broader libSystem/Objective-C/Swift, Foundation/AppKit GUI, and actual macOS app compatibility |
@@ -56,6 +56,14 @@ The latest hardening stores the validated HFS+ volume allocation-block count in 
 ### Stage 0.8 — Bounded HFS+ catalog B-tree header probing (verified)
 
 The read-only HFS+ probe now validates the catalog fork's logical size and first extent before calculating the first catalog sector. It reads that sector through the existing UDIF reader and checks a 512-byte B-tree header node, its descriptor, tree depth, root/leaf node indexes, node counts, and record-offset table. Unsupported larger node sizes are rejected rather than partially interpreted. Both the Files inspector and QEMU integration fixture exercise this path. The fixture's B-tree header is **synthetic**, with no usable leaf records or directory hierarchy; no HFS+ directory enumeration, file extraction, or mounting is claimed.
+
+### Stage 0.8 — Read-only HFS+ mount + contained app extraction and execution (QEMU verified)
+
+`kernel/hfsplus_read.c` builds a bounded, read-only HFS+ mount on the existing UDIF `blkx` sector reader. It validates HFS+ volume and catalog B-tree headers, supports a **single 512-byte root leaf** in the first catalog extent, parses UTF-16BE ASCII catalog keys, recognizes a root file data-fork record, validates its first allocation extent, and extracts up to 16 KiB from a zlib-compressed DMG. Larger B-trees, extents and arbitrary filesystem writes are unsupported.
+
+`tools/genhfsmount.py` generates a small **HFS+ test volume** with allocation bitmap, catalog header/leaf and data fork containing the real ARM64 Mach-O fixture `DARWIN.MCH`, wrapped as `APPS/MOUNT.DMG`. It is neither a general HFS+ formatter nor a genuine Apple `.app`/PKG installer. Opening that audited DMG in Files, or the boot test, extracts its `DARWIN.MCH` to FAT16 `APPS/DMGAPP.MCH`, verifies the file and runs it in the limited ARM64 Darwin interpreter. QEMU's GitHub Actions job independently extracts the **persisted file** using `mcopy`, compares it with the original Mach-O using `cmp`, and requires successful boot and app execution: https://github.com/darkness22s/Bordify-OS/actions/runs/42507837922.
+
+Host tests cover compressed UDIF → read-only mount → catalog record lookup → data-fork extraction and malformed record offsets, root IDs, and extents. This makes **the audited sample DMG extraction/install flow** a green *test gate only*. **General macOS DMG mounting and installation must not be labeled green.** Missing capabilities include APFS, full HFS+ folder hierarchies and B-tree traversals, multi-extent files, all codecs, macOS `.app` bundles, PKG scripts, system frameworks, security policies and real third-party installers.
 
 ### Stage 0.7 — HFS+ and HFSX volume-header probing (verified)
 
