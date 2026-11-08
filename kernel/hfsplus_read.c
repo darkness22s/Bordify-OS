@@ -132,7 +132,10 @@ bool hfsplus_find_root_file(const hfsplus_mount_t *m,
     if (!read_sector(m,sector,node)) return false;
     /* Leaf node descriptor: fLink,bLink,kind(-1),height(1),records,reserved. */
     uint16_t count=be16(node+10);
-    if (node[8]!=0xff || node[9]!=1 || be16(node+12)!=0 ||
+    /* A depth-one tree consists of a single root leaf. Links to other
+     * leaves would require traversal we do not implement: reject them. */
+    if (be32(node)!=0 || be32(node+4)!=0 ||
+        node[8]!=0xff || node[9]!=1 || be16(node+12)!=0 ||
         count==0 || count>16 || count!=m->file_count)
         return false;
     size_t table_start=512u-2u*((size_t)count+1u);
@@ -170,7 +173,7 @@ bool hfsplus_find_root_file(const hfsplus_mount_t *m,
         uint32_t first=be32(fork+16);
         uint32_t blocks=be32(fork+20);
         if (!logical || logical>HFSPLUS_MAX_EXTRACT ||
-            !total || !blocks || blocks>total || first==0 ||
+            !total || !blocks || blocks!=total || first==0 ||
             first>=m->total_allocation_blocks ||
             blocks>m->total_allocation_blocks-first ||
             logical>(uint64_t)blocks*m->allocation_block_bytes ||
@@ -213,7 +216,12 @@ bool hfsplus_read_file(const hfsplus_mount_t *m,
     uint8_t sector[512];
     uint32_t written=0;
     for (uint64_t i=0;i<sectors;++i) {
-        if (!read_sector(m,base+i,sector)) return false;
+        if (!read_sector(m,base+i,sector)) {
+            /* Never expose a successful-looking partial extraction when
+             * a later sector is unreadable or its checksum fails. */
+            for (uint32_t j=0;j<written;++j) out[j]=0;
+            return false;
+        }
         unsigned take=file->size-written<512u ? file->size-written : 512u;
         for (unsigned j=0;j<take;++j) out[written+j]=sector[j];
         written+=take;
