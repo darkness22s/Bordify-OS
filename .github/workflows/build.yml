@@ -42,9 +42,10 @@ jobs:
           set -o pipefail
           mkdir -p build
           sudo chmod a+r dist/Bordify-OS.img
+          cp --sparse=always dist/Bordify-OS.img build/win64-installer-smoke.img
           set +e
           timeout --signal=TERM 25s qemu-system-i386 \
-            -drive file=dist/Bordify-OS.img,format=raw,if=ide,snapshot=on \
+            -drive file=build/win64-installer-smoke.img,format=raw,if=ide \
             -nic user,model=e1000 -m 128 -vga std -display none \
             -serial file:build/qemu-serial.log -no-reboot -no-shutdown \
             >build/qemu-output.log 2>&1
@@ -70,6 +71,12 @@ jobs:
           grep -F "[win32] PE32 process exited 0" build/qemu-serial.log
           grep -F "BORDIFY WIN64: PE32+ x64 WriteFile interpreted on x86 kernel" build/qemu-serial.log
           grep -F "[win64] PE32+ AMD64 interpreted safely; 3 imports; exited 0" build/qemu-serial.log
+          grep -F "[win64-install] PE32+ installer committed APP64.EXE (2048 bytes)" build/qemu-serial.log
+          grep -F "[win64-install] installed AMD64 application launched; exit 0" build/qemu-serial.log
+          # Validate real FAT16 persistence outside the running guest.
+          mcopy -i "build/win64-installer-smoke.img@@1048576" "::APPS/APP64.EXE" build/app64-extracted.exe
+          cmp build/app64-extracted.exe build/apps/win64demo.exe
+          echo "Persistent Windows x64 PE32+ installer test: PASS"
           grep -F "BORDIFY DARWIN: NSString objc_msgSend and BSD write on ARM64" build/qemu-serial.log
           grep -F "[darwin] ARM64 BSD syscall and NSString/NSApplication bridge verified; exited 0" build/qemu-serial.log
           grep -F "[kernel] starting desktop" build/qemu-serial.log
