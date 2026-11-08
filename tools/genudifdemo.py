@@ -34,9 +34,23 @@ def make(output, compress=False, hfsplus=False):
         be32(raw, header + 40, 4096)     # allocation block bytes
         be32(raw, header + 44, 8)        # 8 blocks, 64 sectors
         be32(raw, header + 48, 3)        # free blocks
-        be32(raw, header + 284, 2)       # catalog fork total blocks
+        be32(raw, header + 276, 8192)    # catalog logical bytes\n        be32(raw, header + 284, 2)       # catalog fork total blocks
         be32(raw, header + 288, 2)       # catalog first extent start
         be32(raw, header + 292, 2)       # catalog first extent length
+        # Synthetic B-tree header node at first catalog extent, block 2.
+        node = 2 * 4096
+        raw[node + 8] = 1               # header node kind
+        struct.pack_into(">H", raw, node + 10, 3)  # three records
+        struct.pack_into(">H", raw, node + 14, 1)  # depth
+        be32(raw, node + 16, 1)         # root node
+        be32(raw, node + 20, 1)         # leaf record count
+        be32(raw, node + 24, 1)         # first leaf
+        be32(raw, node + 28, 1)         # last leaf
+        struct.pack_into(">H", raw, node + 32, 512)  # B-tree node size
+        be32(raw, node + 36, 16)        # total nodes
+        be32(raw, node + 40, 12)        # free nodes
+        for at, value in ((510, 14), (508, 120), (506, 248), (504, 256)):
+            struct.pack_into(">H", raw, node + at, value)
     else:
         marker = (b"BORDIFY_DMG_ZLIB_SECTOR_VERIFIED!" if compress
                   else b"BORDIFY_DMG_RAW_SECTOR_READ_OK!!")
