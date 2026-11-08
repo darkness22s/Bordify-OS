@@ -218,13 +218,13 @@ static void files_open_selected(void) {
     exec_info_t executable;
     if (exec_inspect(fs.viewer_text, (size_t)bytes, &executable)) {
         snprintf(fs.viewer_text, sizeof(fs.viewer_text),
-                 "Executable file: %s\\n"
-                 "Format: %s\\n"
-                 "CPU: %s\\n"
-                 "Header: %s\\n"
-                 "File size: %u bytes\\n\\n"
-                 "%s\\n\\n"
-                 "Bordify does not execute foreign binaries yet.\\n"
+                 "Executable file: %s\n"
+                 "Format: %s\n"
+                 "CPU: %s\n"
+                 "Header: %s\n"
+                 "File size: %u bytes\n\n"
+                 "%s\n\n"
+                 "Bordify does not execute foreign binaries yet.\n"
                  "This is a safe file-format inspection, not an app launcher.",
                  entry->display,
                  exec_format_name(executable.format),
