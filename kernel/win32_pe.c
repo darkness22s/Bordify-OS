@@ -6,7 +6,8 @@
  *
  * Supported kernel32.dll imports:
  *   ExitProcess(uExitCode), GetStdHandle(STD_OUTPUT_HANDLE),
- *   WriteFile(handle, data, length, written, overlapped), GetLastError().
+ *   WriteFile, GetLastError, CreateFileA, ReadFile and CloseHandle.
+ *   Only a bounded, fixed Windows path is backed by FAT16.
  *
  * The bridges below reside INSIDE user memory and use Bordify int 0x80;
  * no imported Windows instruction runs at CPL0.
@@ -63,6 +64,12 @@ static uint32_t bridge_address(const uint8_t *image, uint32_t size,
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 2u;
     if (name_in_image(image, size, name_rva, "GetLastError"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 3u;
+    if (name_in_image(image,size,name_rva,"CreateFileA"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 4u;
+    if (name_in_image(image,size,name_rva,"ReadFile"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 5u;
+    if (name_in_image(image,size,name_rva,"CloseHandle"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 6u;
     return 0;
 }
 
@@ -200,45 +207,65 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
 }
 
 bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
-    if (!memory || !fits(size, WIN32_PE_RUNTIME_OFFSET, BRIDGE_SLOT * 4u))
+    if (!memory || !fits(size,WIN32_PE_RUNTIME_OFFSET,BRIDGE_SLOT*7u))
         return false;
-    static const uint8_t exit_process[] = {
-        0x8b,0x5c,0x24,0x04,             /* mov ebx, [esp+4] */
-        0xb8,0x02,0x00,0x00,0x00,       /* mov eax, 2  (exit) */
-        0xcd,0x80,0x0f,0x0b             /* int 80h; ud2 */
+    /* Tiny x86 stdcall stubs assembled and inspected for exact calling
+     * conventions. Every syscall is invoked from the guest's ring-3
+     * mapping; kernel does not expose executable dispatch pointers.
+     */
+    static const uint8_t exit_process[]={
+        0x8b,0x5c,0x24,0x04,0xb8,0x02,0,0,0,0xcd,0x80,0x0f,0x0b
     };
-    static const uint8_t get_std_handle[] = {
-        0xb8,0x01,0x00,0x00,0x00,       /* fake stdout handle = 1 */
-        0xc2,0x04,0x00                 /* ret 4 */
+    static const uint8_t get_std_handle[]={
+        0xb8,0x01,0,0,0,0xc2,0x04,0
     };
-    static const uint8_t write_file[] = {
-        0x53,                          /* push ebx */
-        0x8b,0x5c,0x24,0x0c,           /* mov ebx, [esp+12] buffer */
-        0x8b,0x4c,0x24,0x10,           /* mov ecx, [esp+16] length */
-        0xb8,0x01,0x00,0x00,0x00,      /* mov eax,1 */
-        0xcd,0x80,                     /* syscall write */
-        0x8b,0x54,0x24,0x14,           /* mov edx, [esp+20] written pointer */
-        0x85,0xd2,                     /* test edx,edx */
-        0x74,0x02,                     /* jz skip store */
-        0x89,0x02,                     /* mov [edx],eax */
-        0x5b,                          /* pop ebx */
-        0xb8,0x01,0x00,0x00,0x00,      /* mov eax,TRUE */
-        0xc2,0x14,0x00                 /* stdcall ret 20 */
+    /* WriteFile dispatches the pseudo stdout handle 1 to the existing
+     * console service, and WIN32_FILE_HANDLE to the bounded file writer.
+     * The Win32 lpNumberOfBytesWritten output is populated when non-NULL.
+     */
+    static const uint8_t write_file[]={
+        0x53,0x8b,0x5c,0x24,0x08,0x8b,0x4c,0x24,0x0c,
+        0x8b,0x54,0x24,0x10,0x83,0xfb,0x01,0x75,0x09,
+        0xb8,0x01,0,0,0,0xcd,0x80,0xeb,0x07,
+        0xb8,0x04,0,0,0,0xcd,0x80,0x83,0xf8,0xff,
+        0x74,0x11,0x8b,0x54,0x24,0x14,0x85,0xd2,
+        0x74,0x02,0x89,0x02,0xb8,0x01,0,0,0,
+        0xeb,0x02,0x31,0xc0,0x5b,0xc2,0x14,0
     };
-    static const uint8_t get_last_error[] = {
-        0x31,0xc0,0xc3                  /* xor eax,eax; ret */
+    static const uint8_t get_last_error[]={
+        0xb8,0x07,0,0,0,0xcd,0x80,0xc3
     };
-    const uint8_t *code[4] = {
-        exit_process, get_std_handle, write_file, get_last_error
+    static const uint8_t create_file[]={
+        0x53,0x8b,0x5c,0x24,0x08,0x8b,0x4c,0x24,0x0c,
+        0x8b,0x54,0x24,0x18,0xb8,0x03,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x1c,0
     };
-    const size_t lengths[4] = {
-        sizeof(exit_process), sizeof(get_std_handle),
-        sizeof(write_file), sizeof(get_last_error)
+    static const uint8_t read_file[]={
+        0x53,0x8b,0x5c,0x24,0x08,0x8b,0x4c,0x24,0x0c,
+        0x8b,0x54,0x24,0x10,0xb8,0x05,0,0,0,
+        0xcd,0x80,0x83,0xf8,0xff,0x74,0x11,
+        0x8b,0x54,0x24,0x14,0x85,0xd2,0x74,0x02,
+        0x89,0x02,0xb8,0x01,0,0,0,0xeb,0x02,
+        0x31,0xc0,0x5b,0xc2,0x14,0
     };
-    for (size_t i = 0; i < 4; ++i) {
-        uint8_t *dest = memory + WIN32_PE_RUNTIME_OFFSET + i * BRIDGE_SLOT;
-        clear_bytes(dest, BRIDGE_SLOT);
-        copy_bytes(dest, code[i], lengths[i]);
+    static const uint8_t close_handle[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,0x06,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t *const code[7]={
+        exit_process,get_std_handle,write_file,get_last_error,
+        create_file,read_file,close_handle
+    };
+    static const size_t lengths[7]={
+        sizeof(exit_process),sizeof(get_std_handle),
+        sizeof(write_file),sizeof(get_last_error),
+        sizeof(create_file),sizeof(read_file),sizeof(close_handle)
+    };
+    for(size_t i=0;i<7;++i){
+        if(lengths[i]>BRIDGE_SLOT) return false;
+        uint8_t *dest=memory+WIN32_PE_RUNTIME_OFFSET+i*BRIDGE_SLOT;
+        clear_bytes(dest,BRIDGE_SLOT);
+        copy_bytes(dest,code[i],lengths[i]);
     }
     return true;
 }
