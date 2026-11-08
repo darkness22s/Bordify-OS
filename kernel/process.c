@@ -105,6 +105,16 @@ void process_init(void) {
     page_directory = (uint32_t *)kmalloc_aligned(4096, 4096);
     user_page_table = (uint32_t *)kmalloc_aligned(4096, 4096);
     user_memory = (uint8_t *)kmalloc_aligned(PROCESS_USER_BYTES, 4096);
+    /* The bump allocator does not free partial allocations; fail closed
+     * without touching any of the tables or enabling ring-3 paging. */
+    if (!page_directory || !user_page_table || !user_memory) {
+        kprintf("[process] user-mode allocation failed; paging disabled\n");
+        page_directory = NULLPTR;
+        user_page_table = NULLPTR;
+        user_memory = NULLPTR;
+        ready = false;
+        return;
+    }
 
     /*
      * Identity-map the 32-bit address space for the existing kernel, using
