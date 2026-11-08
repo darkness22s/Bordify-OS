@@ -47,6 +47,8 @@ bool fat16_create_file(uint16_t dir_cluster, const char *name);
 bool fat16_delete(uint16_t dir_cluster, const char *name);
 bool fat16_rename(uint16_t dir_cluster, const char *name, const char *new_name);
 int fat16_read(uint16_t dir_cluster, const char *name, void *buffer, uint32_t max_size);
+int fat16_read_range(uint16_t dir_cluster, const char *name,
+                     uint32_t offset, void *buffer, uint32_t max_size);
 int fat16_write(uint16_t dir_cluster, const char *name, const void *buffer, uint32_t size);
 int fat16_read_path(const char *path, void *buffer, uint32_t max_size);
 int fat16_write_path(const char *path, const void *buffer, uint32_t size);
