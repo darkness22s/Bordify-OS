@@ -27,6 +27,10 @@ static void test_pe(void) {
     le16(b + 0x94, 0xf0); le16(b + 0x98, 0x020b);
     assert(exec_inspect(b, sizeof(b), &info));
     assert(info.valid && info.format == EXEC_FORMAT_PE64 && info.arch == EXEC_ARCH_X86_64);
+    /* Windows on ARM64 is a distinct PE32+ machine type. */
+    le16(b + 0x84, 0xaa64);
+    assert(exec_inspect(b, sizeof(b), &info));
+    assert(info.valid && info.format == EXEC_FORMAT_PE64 && info.arch == EXEC_ARCH_ARM64);
     assert(exec_inspect(b, 0x90, &info) && !info.valid);
     le32(b + 0x3c, 0xffffffffu);
     assert(exec_inspect(b, sizeof(b), &info) && !info.valid);
@@ -44,6 +48,10 @@ static void test_macho(void) {
     le32(b + 16, 1); le32(b + 20, 72);
     assert(exec_inspect(b, sizeof(b), &info));
     assert(info.valid && info.format == EXEC_FORMAT_MACHO64 && info.arch == EXEC_ARCH_X86_64);
+    /* Apple Silicon thin Mach-O uses CPU_TYPE_ARM64. */
+    le32(b + 4, 0x0100000c);
+    assert(exec_inspect(b, sizeof(b), &info));
+    assert(info.valid && info.format == EXEC_FORMAT_MACHO64 && info.arch == EXEC_ARCH_ARM64);
     assert(exec_inspect(b, 16, &info) && !info.valid);
     clear(b, sizeof(b));
     /* Apple universal Mach-O, two architecture entries. */
