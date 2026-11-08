@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build a deterministic, *uncompressed*, read-only test UDIF DMG.
+"""Build deterministic tiny UDIF fixtures for FAT16/QEMU integration.
 
-The 512-byte disk contains a marker. A 'mish' block map references that
-raw sector. This exercises actual FAT16 offset reads and UDIF block-map
-decoding in QEMU; it is NOT an HFS+/APFS installer disk.
+--hfsplus contains a synthetic HFS+ volume *header* in the third logical
+sector. Its catalog B-tree is intentionally absent: this is a filesystem
+header recognition test, not a mountable macOS volume or an installer.
 """
 from pathlib import Path
 import base64
@@ -22,26 +22,40 @@ def be64(buffer, offset, value):
     struct.pack_into(">Q", buffer, offset, value)
 
 
-def make(output, compress=False):
-    raw = bytearray(SECTOR_SIZE)
-    marker = (b"BORDIFY_DMG_ZLIB_SECTOR_VERIFIED!" if compress
-              else b"BORDIFY_DMG_RAW_SECTOR_READ_OK!!")
-    raw[:len(marker)] = marker
+def make(output, compress=False, hfsplus=False):
+    raw = bytearray(SECTOR_SIZE * (64 if hfsplus else 1))
+    if hfsplus:
+        # HFSPlusVolumeHeader is at byte 1024, in big-endian order.
+        header = 2 * SECTOR_SIZE
+        struct.pack_into(">HH", raw, header, 0x482B, 4)
+        be32(raw, header + 4, 1 << 13)  # journaled
+        be32(raw, header + 32, 7)        # file count
+        be32(raw, header + 36, 2)        # folder count
+        be32(raw, header + 40, 4096)     # allocation block bytes
+        be32(raw, header + 44, 8)        # 8 blocks, 64 sectors
+        be32(raw, header + 48, 3)        # free blocks
+        be32(raw, header + 284, 2)       # catalog fork total blocks
+        be32(raw, header + 288, 2)       # catalog first extent start
+        be32(raw, header + 292, 2)       # catalog first extent length
+    else:
+        marker = (b"BORDIFY_DMG_ZLIB_SECTOR_VERIFIED!" if compress
+                  else b"BORDIFY_DMG_RAW_SECTOR_READ_OK!!")
+        raw[:len(marker)] = marker
     payload = zlib.compress(raw, level=9) if compress else bytes(raw)
     block = bytearray(204 + 40 * 2)
     block[:4] = b"mish"
     be32(block, 4, 1)
     be64(block, 8, 0)   # partition starts at logical sector zero
-    be64(block, 16, 1)  # 1 disk sector
+    be64(block, 16, len(raw) // SECTOR_SIZE)  # logical disk sectors
     be64(block, 24, 0)  # data fork begins at byte zero
     be32(block, 200, 2)
     be32(block, 204, 0x80000005 if compress else 1)  # zlib or raw
     be64(block, 212, 0)  # first sector
-    be64(block, 220, 1)  # sector count
+    be64(block, 220, len(raw) // SECTOR_SIZE)  # run sector count
     be64(block, 228, 0)  # offset into data fork
     be64(block, 236, len(payload))
     be32(block, 244, 0xFFFFFFFF)  # end
-    be64(block, 252, 1)           # next logical sector
+    be64(block, 252, len(raw) // SECTOR_SIZE)  # next logical sector
 
     encoded = base64.b64encode(block).decode("ascii")
     xml = ("<?xml version='1.0' encoding='UTF-8'?>\n"
@@ -57,17 +71,20 @@ def make(output, compress=False):
     be64(footer, 32, len(payload))     # data fork size
     be64(footer, 216, len(payload))  # XML offset
     be64(footer, 224, len(xml))  # XML size
-    be64(footer, 492, 1)      # logical sector count
+    be64(footer, 492, len(raw) // SECTOR_SIZE)  # logical sectors
 
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(payload + xml + footer)
-    print(f"Generated {out} ({'zlib' if compress else 'raw'} UDIF sector, {len(xml)}-byte blkx plist)")
+    kind = "HFS+ header (not mountable)" if hfsplus else "sector marker"
+    print(f"Generated {out} ({'zlib' if compress else 'raw'} UDIF, {kind}, {len(xml)}-byte blkx plist)")
 
 
 if __name__ == "__main__":
     if len(sys.argv) not in (2, 3):
-        raise SystemExit("usage: genudifdemo.py output.dmg [--zlib]")
-    if len(sys.argv) == 3 and sys.argv[2] != "--zlib":
+        raise SystemExit("usage: genudifdemo.py output.dmg [--zlib|--hfsplus]")
+    option = sys.argv[2] if len(sys.argv) == 3 else ""
+    if option not in ("", "--zlib", "--hfsplus"):
         raise SystemExit("unknown option")
-    make(sys.argv[1], len(sys.argv) == 3)
+    make(sys.argv[1], option in ("--zlib", "--hfsplus"),
+         option == "--hfsplus")
