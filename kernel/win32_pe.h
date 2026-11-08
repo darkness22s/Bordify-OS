@@ -3,12 +3,15 @@
 #include "types.h"
 
 /*
- * First-stage Windows compatibility: standalone PE32 console loader.
- * Deliberately restricted to x86, a fixed image base and a tiny kernel32
- * import subset. It DOES NOT run PE32+ / x64 executables or installers.
+ * Experimental native x86 PE32 (ring-3) console loader with seven
+ * kernel32 imports: ExitProcess, GetStdHandle, WriteFile, GetLastError,
+ * CreateFileA, ReadFile and CloseHandle. The file-I/O bridge is bounded
+ * to a single, fixed FAT16-backed path (see win32_files.h).
+ * This is NOT Wine, general Win32 GUI support or a Win64 loader: the
+ * unrelated PE32+ AMD64 interpreter lives in pe64_vm.c.
  *
- * Memory supplied here must be a private, user-accessible mapping; the
- * loader only copies bytes and never transfers control to foreign code.
+ * Memory supplied here must be a private user-accessible mapping;
+ * this loader stages and validates only and never executes guest code.
  */
 #define WIN32_PE_USER_BASE 0x40000000u
 #define WIN32_PE_MAX_IMAGE (192u * 1024u)
