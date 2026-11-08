@@ -26,7 +26,7 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(patsubst %.S,$(BUILD)/%.o,$(AFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
-all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/winio.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch $(BUILD)/apps/mount.dmg $(BUILD)/apps/armwork.mch $(BUILD)/apps/armcalc.mch
+all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/winio.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch $(BUILD)/apps/mount.dmg $(BUILD)/apps/armwork.mch $(BUILD)/apps/armcalc.mch $(BUILD)/apps/cocoa.mch
 
 $(BUILD)/apps/win64setup.exe: tools/genwin64setup.py $(BUILD)/apps/win64demo.exe
 	@mkdir -p $(BUILD)/apps
@@ -43,6 +43,13 @@ $(BUILD)/apps/mount.dmg: tools/genhfsmount.py $(BUILD)/apps/darwin.mch
 $(BUILD)/apps/darwin.mch: tools/gendarwindemo.py
 	@mkdir -p $(BUILD)/apps
 	$(PYTHON) tools/gendarwindemo.py $@
+
+$(BUILD)/apps/cocoa.o: apps/cocoa_lifecycle.S
+	@mkdir -p $(BUILD)/apps
+	$(CLANG) -target arm64-apple-macos11 -c $< -o $@
+
+$(BUILD)/apps/cocoa.mch: $(BUILD)/apps/cocoa.o tools/linkcocoaobj.py
+	$(PYTHON) tools/linkcocoaobj.py $(BUILD)/apps/cocoa.o $@
 
 $(BUILD)/apps/armcalc.o: apps/armcalc.c
 	@mkdir -p $(BUILD)/apps
@@ -166,6 +173,10 @@ $(BUILD)/tests/pe64_install_test: tests/pe64_install_test.c kernel/pe64_vm.c ker
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/pe64_install_test.c kernel/pe64_vm.c -o $@
 
+$(BUILD)/tests/cocoa_lifecycle_test: tests/cocoa_lifecycle_test.c kernel/a64_macho.c kernel/darwin_objc.c kernel/darwin_objc.h $(BUILD)/apps/cocoa.mch
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/cocoa_lifecycle_test.c kernel/a64_macho.c kernel/darwin_objc.c -o $@
+
 $(BUILD)/tests/a64_c_test: tests/a64_c_test.c kernel/a64_macho.c kernel/darwin_objc.c $(BUILD)/apps/armcalc.mch
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/a64_c_test.c kernel/a64_macho.c kernel/darwin_objc.c -o $@
@@ -182,7 +193,8 @@ $(BUILD)/tests/hfsplus_read_test: tests/hfsplus_read_test.c kernel/hfsplus_read.
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/hfsplus_read_test.c kernel/hfsplus_read.c kernel/hfsplus_probe.c kernel/udif_blkx.c kernel/zlib_inflate.c kernel/package_inspect.c -lz -o $@
 
-test: $(BUILD)/tests/win32_files_test $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+test: $(BUILD)/tests/cocoa_lifecycle_test $(BUILD)/tests/win32_files_test $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+	./$(BUILD)/tests/cocoa_lifecycle_test
 	./$(BUILD)/tests/win32_files_test
 	./$(BUILD)/tests/a64_c_test
 	./$(BUILD)/tests/a64_workload_test
