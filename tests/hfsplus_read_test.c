@@ -24,6 +24,12 @@ static int read_bytes(void *ctx,uint64_t at,void *out,size_t n) {
     memcpy(out,src->bytes+(size_t)at,n);
     return (int)n;
 }
+/* Simulate a second-sector I/O failure after the first 512 bytes
+ * have already been copied to the caller's extraction buffer. */
+static int fail_second_file_sector(void *ctx,uint64_t at,void *out,size_t n) {
+    if (at >= 4u*4096u+512u) return -1;
+    return read_bytes(ctx,at,out,n);
+}
 static udif_block_map_t map;
 static void raw_map(void) {
     memset(&map,0,sizeof(map));
@@ -96,6 +102,13 @@ int main(void) {
     assert(hfsplus_find_root_file(&mount,"DARWIN.MCH",&file));
     assert(hfsplus_read_file(&mount,&file,payload,sizeof(payload)) &&
            !memcmp(payload,original,original_size));
+    memset(payload,0xa5,sizeof(payload));
+    hfsplus_mount_t partial=mount;
+    partial.reader=fail_second_file_sector;
+    assert(!hfsplus_read_file(&partial,&file,payload,sizeof(payload)));
+    for (size_t i=0;i<512;++i) assert(payload[i]==0);
+    assert(payload[512]==0xa5);
+
 
     /* A forged extent pointing into a free allocation block is rejected
        even though the block is physically readable from the UDIF image. */
