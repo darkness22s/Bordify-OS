@@ -22,6 +22,19 @@ static void bytes_zero(uint8_t *to, size_t size) {
 /* Guest pointers are never dereferenced as kernel pointers. All loads
  * and stores validate both the low and high address before touching RAM.
  */
+/* Refuse 64-bit pointer arithmetic wraparound before any guest access. */
+static bool a64_add_signed(uint64_t base, int32_t delta, uint64_t *out) {
+    if (!out) return false;
+    if (delta >= 0) {
+        if (base > UINT64_MAX - (uint32_t)delta) return false;
+        *out = base + (uint32_t)delta;
+    } else {
+        uint64_t magnitude = (uint64_t)(-(int64_t)delta);
+        if (base < magnitude) return false;
+        *out = base - magnitude;
+    }
+    return true;
+}
 static bool a64_guest_offset(uint64_t address, size_t bytes,
                              size_t capacity, size_t *offset) {
     if (address < A64_GUEST_BASE ||
@@ -373,7 +386,9 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
             unsigned rn=(instruction>>5)&31u;
             int32_t delta=a64_sign_extend((instruction>>15)&127u,7)*8;
             uint64_t base=rn==31u ? stack_pointer : registers[rn];
-            uint64_t addr=load ? base : (uint64_t)((int64_t)base+delta);
+            uint64_t updated, addr;
+            if (!a64_add_signed(base,delta,&updated)) return false;
+            addr=load ? base : updated;
             size_t off;
             if (!a64_guest_offset(addr,16u,guest_size,&off)) return false;
             if (load) {
@@ -391,8 +406,6 @@ static bool a64_run_impl(const uint8_t *file, size_t file_size,
                                rt2==31u ? 0 : registers[rt2],
                                (size_t)segment_file_size)) return false;
             }
-            uint64_t updated=load ?
-                (uint64_t)((int64_t)base+delta) : addr;
             if (rn==31u) stack_pointer=updated;
             else registers[rn]=updated;
             pc+=4; continue;
