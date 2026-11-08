@@ -133,13 +133,14 @@ bool exec_inspect(const void *data, size_t size, exec_info_t *out) {
             uint32_t command_bytes = u32(p + 20, little);
             out->valid = filetype > 0 && filetype <= 12 &&
                          command_count <= 4096 &&
-                         command_count <= command_bytes / 8;
+                         command_count <= command_bytes / 8 &&
+                          available(size, is64 ? 32u : 28u, command_bytes);
             return true;
         }
 
         /* ELF is useful to recognize, but is not yet a Bordify ABI. */
         if (p[0] == 0x7f && p[1] == 'E' && p[2] == 'L' && p[3] == 'F') {
-            if (!available(size, 0, 5)) return true;
+            if (!available(size, 0, 6)) return true;
             out->format = p[4] == 2 ? EXEC_FORMAT_ELF64 : EXEC_FORMAT_ELF32;
             uint8_t cls = p[4], endian = p[5];
             if ((cls != 1 && cls != 2) || (endian != 1 && endian != 2)) return true;
