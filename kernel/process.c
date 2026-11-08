@@ -5,6 +5,7 @@
 #include "serial.h"
 #include "printf.h"
 #include "string.h"
+#include "win32_pe.h"
 
 #define PAGE_PRESENT 0x001u
 #define PAGE_RW      0x002u
@@ -204,6 +205,52 @@ int process_run_elf32(const char *directory, const char *filename) {
     process_enter(entry, PROCESS_USER_BASE + PROCESS_USER_BYTES - 16);
     running = false;
     kprintf("[process] ELF32 user program exited %d\n", exit_status);
+    return exit_status;
+}
+
+/*
+ * First working Win32 milestone: a PE32 console image with a small,
+ * explicitly allowed kernel32.dll import surface. No GUI/registry/MSI,
+ * no PE64, and no arbitrary application or installer compatibility.
+ */
+int process_run_win32_pe(const char *directory, const char *filename) {
+    if (!ready || running || !fat16_mounted()) return -1;
+
+    fat_entry_t folder, entry;
+    if (!fat16_find(0, directory, &folder) ||
+        !(folder.attr & FAT_ATTR_DIRECTORY) ||
+        !fat16_find(folder.cluster, filename, &entry) ||
+        (entry.attr & FAT_ATTR_DIRECTORY) ||
+        entry.size < 512 || entry.size > 64u * 1024u) {
+        kprintf("[win32] executable not found or outside PE32 sandbox limits\n");
+        return -1;
+    }
+    /* Reuse a fixed staging buffer; the bump heap cannot free allocations. */
+    static uint8_t file_bytes[64u * 1024u];
+    if (fat16_read(folder.cluster, filename, file_bytes, entry.size) !=
+        (int)entry.size) {
+        kprintf("[win32] failed to read PE32 image\n");
+        return -1;
+    }
+
+    win32_pe_info_t image;
+    if (!win32_pe_stage(file_bytes, entry.size,
+                        (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+                        PROCESS_USER_BYTES, &image) ||
+        !win32_pe_install_bridges(
+             (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+             PROCESS_USER_BYTES)) {
+        kprintf("[win32] unsupported PE32 image, missing imports or unsafe layout\n");
+        return -1;
+    }
+
+    running = true;
+    exit_status = -1;
+    kprintf("[win32] launched PE32 console in ring 3 with %u kernel32 imports\n",
+            image.imported_functions);
+    process_enter(image.entry, PROCESS_USER_BASE + PROCESS_USER_BYTES - 16);
+    running = false;
+    kprintf("[win32] PE32 process exited %d\n", exit_status);
     return exit_status;
 }
 
