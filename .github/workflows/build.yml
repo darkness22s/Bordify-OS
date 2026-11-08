@@ -36,9 +36,10 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
+          sudo chmod a+r dist/Bordify-OS.img
           set +e
           timeout --signal=TERM 25s qemu-system-i386 \
-            -drive file=dist/Bordify-OS.img,format=raw,if=ide \
+            -drive file=dist/Bordify-OS.img,format=raw,if=ide,snapshot=on \
             -nic user,model=e1000 -m 128 -vga std -display none \
             -serial file:build/qemu-serial.log -no-reboot -no-shutdown \
             >build/qemu-output.log 2>&1
