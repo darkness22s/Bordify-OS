@@ -4,7 +4,7 @@
 #include "types.h"
 
 #define PROCESS_USER_BASE 0x40000000u
-#define PROCESS_USER_BYTES (256u * 1024u)
+#define PROCESS_USER_BYTES (2u * 1024u * 1024u)
 
 /*
  * Stage-1 x86 protected-process execution. This is a native Bordify ELF32
