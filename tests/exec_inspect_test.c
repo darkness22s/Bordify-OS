@@ -65,6 +65,7 @@ static void test_elf_and_unknown(void) {
     assert(exec_inspect(b, sizeof(b), &info));
     assert(info.valid && info.format == EXEC_FORMAT_ELF64 && info.arch == EXEC_ARCH_ARM64);
     assert(exec_inspect(b, 4, &info) && !info.valid);
+    assert(exec_inspect(b, 32, &info) && !info.valid);
 }
 
 int main(void) {
