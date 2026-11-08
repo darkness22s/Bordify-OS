@@ -51,6 +51,8 @@ jobs:
           fi
           cat build/qemu-serial.log
           grep -F "[dmg] read-only raw UDIF sector verified in QEMU" build/qemu-serial.log
+          grep -F "BORDIFY ARM64: interpreted Mach-O demo under x86 QEMU" build/qemu-serial.log
+          grep -F "[arm64] Mach-O interpreted safely; guest exited 0 after 7 steps" build/qemu-serial.log
           grep -F "[process] paging on" build/qemu-serial.log
           grep -F "BORDIFY USERMODE: hello from an isolated ring-3 ELF32 app" build/qemu-serial.log
           grep -F "[process] ELF32 user program exited 0" build/qemu-serial.log
