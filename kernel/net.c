@@ -1164,6 +1164,31 @@ static int http_extract(const char *response, int response_len,
     return copy;
 }
 
+static bool http_content_exceeds_buffer(const char *response, int len) {
+    const char *header_end = kstrstr(response, "\r\n\r\n");
+    if (!header_end) {
+        return false;
+    }
+    char value[32];
+    if (!http_header(response, "Content-Length", value, sizeof(value))) {
+        return false;
+    }
+    uint32_t expected = 0;
+    for (const char *p = value; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            return false;
+        }
+        uint32_t digit = (uint32_t)(*p - '0');
+        if (expected > (UINT32_MAX - digit) / 10u) {
+            return true;
+        }
+        expected = expected * 10u + digit;
+    }
+    int header_len = (int)(header_end - response) + 4;
+    int max_body = TCP_RX_MAX - 1 - header_len;
+    return len >= header_len && expected > (uint32_t)max_body;
+}
+
 static bool http_complete(const char *response, int len) {
     const char *header_end = kstrstr(response, "\r\n\r\n");
     if (!header_end) {
@@ -1431,6 +1456,11 @@ int net_https_get(const char *host, uint16_t port, const char *path,
         }
         total += n;
         tls_rx[total] = 0;
+        if (http_content_exceeds_buffer(tls_rx, total)) {
+            net_set_error("The HTTPS response exceeds the 64 KiB page limit");
+            tcp.active = false;
+            return -1;
+        }
         if (http_complete(tls_rx, total)) {
             break;
         }
