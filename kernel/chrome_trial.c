@@ -86,6 +86,49 @@ static void try_windows(uint16_t parent) {
             ran && report.finished ? "finished" : "rejected");
 }
 
+/* Independent Windows application tests: one generic procedure rather
+ * than per-app hard-coded imports. This is a genuine safe launch attempt
+ * through the current PE32 loader, not pretend execution of unsupported PE.
+ */
+static void try_other_windows(uint16_t parent, const char *filename,
+                              const char *label) {
+    fat_entry_t item;
+    if (!fat16_find(parent,filename,&item) ||
+        (item.attr & FAT_ATTR_DIRECTORY)) {
+        kprintf("[winapps] %s: file not available on FAT16\n",label);
+        return;
+    }
+    kprintf("[winapps] %s: real file size=%u\n",label,item.size);
+    uint8_t first[512];
+    if (item.size<512 || fat16_read_range(parent,item.name,0,
+                                         first,sizeof(first))!=512) {
+        kprintf("[winapps] %s: header read rejected\n",label);
+        return;
+    }
+    exec_info_t info;
+    if (!exec_inspect(first,sizeof(first),&info) || !info.valid) {
+        kprintf("[winapps] %s: PE format rejected\n",label);
+        return;
+    }
+    kprintf("[winapps] %s: detected %s / %s\n",
+            label,exec_format_name(info.format),exec_arch_name(info.arch));
+    int rc=process_run_win32_pe("APPS",filename);
+    kprintf("[winapps] %s: native Win32 attempt returned %d\n",label,rc);
+}
+static void inspect_existing_demo(uint16_t parent, const char *filename) {
+    fat_entry_t file;
+    uint8_t header[8];
+    if (!fat16_find(parent,filename,&file) ||
+        fat16_read_range(parent,file.name,0,header,sizeof(header))!=
+            (int)sizeof(header)) {
+        kprintf("[winapps] baseline %s: file/header inaccessible\n",filename);
+        return;
+    }
+    kprintf("[winapps] baseline %s: size=%u first4=%x %x %x %x\n",
+            filename,file.size,(unsigned)header[0],(unsigned)header[1],
+            (unsigned)header[2],(unsigned)header[3]);
+}
+
 static void try_macos(uint16_t parent) {
     fat_entry_t item;
     if (!fat16_find(parent,"CHROME.DMG",&item) ||
@@ -151,7 +194,13 @@ void chrome_trial_run(void) {
         kprintf("[chrome-test] APPS directory unavailable\n");
         return;
     }
+    inspect_existing_demo(apps.cluster,"WINIO.EXE");
+    inspect_existing_demo(apps.cluster,"WIN64.EXE");
+    inspect_existing_demo(apps.cluster,"SETUP64.EXE");
     try_windows(apps.cluster);
+    try_other_windows(apps.cluster,"WEBSET.EXE","Chrome web installer");
+    try_other_windows(apps.cluster,"SEVEN.EXE","7-Zip standalone utility");
+    try_other_windows(apps.cluster,"CHRMAPP.EXE","extracted Chrome application");
     try_macos(apps.cluster);
     kprintf("[chrome-test] experiment complete; no Chrome application launched\n");
 }
