@@ -79,6 +79,13 @@ jobs:
           grep -F "[win32] launched PE32 console in ring 3 with 3 kernel32 imports" build/qemu-serial.log
           grep -F "BORDIFY WIN32: WriteFile through kernel32 compatibility layer" build/qemu-serial.log
           grep -F "[win32] PE32 process exited 0" build/qemu-serial.log
+          grep -F "BORDIFY WIN32 FILE: CreateFileA WriteFile ReadFile CloseHandle verified" build/qemu-serial.log
+          grep -F "[win32-file] ring-3 Win32 CreateFile/WriteFile/ReadFile/CloseHandle roundtrip passed" build/qemu-serial.log
+          # The native ring-3 PE32 test must persist the exact data it read back.
+          mcopy -i "build/win64-installer-smoke.img@@1048576" "::APPS/WIN32.TXT" build/winio-extracted.txt
+          printf 'BORDIFY WIN32 FILE: CreateFileA WriteFile ReadFile CloseHandle verified\r\n' > build/winio-expected.txt
+          cmp build/winio-extracted.txt build/winio-expected.txt
+          echo "Win32 kernel32 ring-3 persistent file API test: PASS"
           grep -F "BORDIFY WIN64: PE32+ x64 WriteFile interpreted on x86 kernel" build/qemu-serial.log
           grep -F "[win64] PE32+ AMD64 interpreted safely; 3 imports; exited 0" build/qemu-serial.log
           grep -F "[win64-install] PE32+ installer committed APP64.EXE (2048 bytes)" build/qemu-serial.log
