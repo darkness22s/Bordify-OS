@@ -1,6 +1,6 @@
 # Foreign application compatibility: architecture and delivery plan
 
-Status: **native ELF32, restricted Windows PE32 console execution, read-only raw/zero/zlib UDIF disk-sector access, and a tiny ARM64 Mach-O interpreter all verified in QEMU**. Full Windows x64 installers, DMG mount/install, Apple Silicon macOS apps and Darwin/Cocoa applications are **NOT** supported.
+Status: **native ELF32, restricted Windows PE32 console execution, read-only raw/zero/zlib UDIF disk-sector access with an HFS+ volume-header probe, and a tiny ARM64 Mach-O interpreter all verified in QEMU**. Full Windows x64 installers, DMG mount/install, Apple Silicon macOS apps and Darwin/Cocoa applications are **NOT** supported.
 
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
@@ -10,7 +10,7 @@ Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in appl
 | Requested feature | Verified now | Not yet working |
 | --- | --- | --- |
 | Windows x64 EXE installers | Windows **x86 PE32** demo calls three kernel32 functions | PE32+ x64 CPU execution, 64-bit DLLs, registry, installation APIs and real setup engines |
-| macOS DMG mounting and installation | DMG footer + XML blkx maps; raw, zero and bounded zlib-compressed sectors from FAT16 disk | Other compression codecs, whole-image mount, APFS/HFS+, PKG/.app installation |
+| macOS DMG mounting and installation | DMG footer + XML blkx maps; raw/zero/zlib sectors and read-only HFS+ header metadata from FAT16 disk | Other compression codecs, HFS+ catalog traversal, APFS, full filesystem mounting, PKG/.app installation |
 | Apple Silicon ARM64 execution | Genuine Mach-O ARM64 demo **interprets 7 instructions** and exits with custom Bordify guest calls | General ARM64 emulation, Darwin ABI, Apple frameworks and real app workloads |
 | Windows compatibility runtime | Four tiny kernel32 entry points for audited PE32 demo | Broader Win32 API, GUI, exception handling, DLLs, installation semantics |
 | macOS Darwin/Cocoa runtime | Mach-O metadata recognition and synthetic ARM64 instruction demo | dyld, libSystem, Objective-C/Swift, Foundation, Cocoa/AppKit and macOS services |
@@ -46,6 +46,12 @@ Notes: executable/container prefix inspection examines only the bytes File Manag
 - **Windows x64 EXE installer:** Beyond PE32+ recognition, needs long-mode/64-bit processes, 64-bit Windows APIs, dynamic DLL loading, registry semantics, installer file/shortcut operations and a target app runtime. Self-extractors such as NSIS/Inno/InstallShield are different formats layered atop PE; compatibility must be tested individually.
 - **MSI:** OLE/CFB signature alone is not proof of a Windows Installer database; use the MSI directory/stream structures to validate and install under a Windows Installer-compatible runtime.
 - **Hardware:** Plan a x86-64 kernel and 64-bit boot path while keeping the current 32-bit boot image working until a tested replacement exists.
+
+### Stage 0.7 — HFS+ and HFSX volume-header probing (verified)
+
+Apple's HFS Plus Volume Format (TN1150) defines a 512-byte big-endian volume header beginning at byte offset 1,024 of a filesystem volume. Bordify now checks signature/version pairing (`H+` version 4 and `HX` version 5), validates allocation-block power-of-two and logical sector limits, free-block counts and the catalog fork's first extent. It exposes read-only HFS+ metadata (block size, volume size, free blocks, file/folder counts, journal flag, and first catalog extent) in the DMG inspector. Host unit tests cover malformed and valid headers, while an **artificial compressed DMG fixture** `APPS/HFSPLUS.DMG` verifies zlib decompression and sector-two HFS+ header parsing during QEMU startup.
+
+This fixture does **not** have a valid catalog B-tree. Bordify **cannot** browse files inside HFS+ volumes or install macOS applications yet. Next steps are a trusted read-only HFS+ B-tree/catalog implementation and access to complete disk-image partitions, then APFS and installer workflows.
 
 ### Stage 0.6 — Bounded zlib-compressed DMG reads (verified)
 
