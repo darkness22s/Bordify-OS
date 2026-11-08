@@ -74,6 +74,24 @@ jobs:
             build/google/googlechrome.dmg "::APPS/CHROME.DMG"
           mdir -i "build/chrome-trial.img@@1048576" "::APPS"
 
+      - name: Verify ordinary Bordify apps survived Chrome image injection
+        run: |
+          set -euo pipefail
+          mkdir -p build/preserved
+          mcopy -i "build/chrome-trial.img@@1048576" "::APPS/WINIO.EXE" build/preserved/winio.exe
+          cmp build/preserved/winio.exe build/apps/winio.exe
+          mcopy -i "build/chrome-trial.img@@1048576" "::APPS/WIN64.EXE" build/preserved/win64.exe
+          cmp build/preserved/win64.exe build/apps/win64demo.exe
+          mcopy -i "build/chrome-trial.img@@1048576" "::APPS/SETUP64.EXE" build/preserved/setup64.exe
+          cmp build/preserved/setup64.exe build/apps/win64setup.exe
+          mcopy -i "build/chrome-trial.img@@1048576" "::APPS/DARWIN.MCH" build/preserved/darwin.mch
+          cmp build/preserved/darwin.mch build/apps/darwin.mch
+          mcopy -i "build/chrome-trial.img@@1048576" "::APPS/COCOA.MCH" build/preserved/cocoa.mch
+          cmp build/preserved/cocoa.mch build/apps/cocoa.mch
+          mcopy -i "build/chrome-trial.img@@1048576" "::APPS/MOUNT.DMG" build/preserved/mount.dmg
+          cmp build/preserved/mount.dmg build/apps/mount.dmg
+          echo "Original Bordify app payloads remain byte-identical on FAT16" | tee build/preserved-check.txt
+
       - name: Boot Bordify in QEMU and attempt both genuine packages
         run: |
           set -euo pipefail
@@ -98,6 +116,15 @@ jobs:
           grep -F "[chrome-mac] app launch rejected:" build/chrome-guest-serial.log
           grep -F "[chrome-test] experiment complete; no Chrome application launched" build/chrome-guest-serial.log
           grep -F "[kernel] starting desktop" build/chrome-guest-serial.log
+          if ! grep -Fq "[win32-file] ring-3 Win32 CreateFile/WriteFile/ReadFile/CloseHandle roundtrip passed" build/chrome-guest-serial.log; then
+            echo "::warning::The standard Win32 persistent-file demo failed on the disk holding large Chrome packages."
+          fi
+          if ! grep -Fq "[win64-install] installed AMD64 application launched; exit 0" build/chrome-guest-serial.log; then
+            echo "::warning::The standard Windows x64 installer demo failed on the disk holding large Chrome packages."
+          fi
+          if ! grep -Fq "[dmg-install] extracted Mach-O ARM64 app launched; exit 0" build/chrome-guest-serial.log; then
+            echo "::warning::The standard HFS+ DMG demo failed on the disk holding large Chrome packages."
+          fi
           if grep -F "PANIC" build/chrome-guest-serial.log; then
             echo "Kernel panic during actual Chrome installer experiment"
             exit 1
@@ -123,5 +150,6 @@ jobs:
             build/chrome-qemu-output.log
             build/chrome-preflight.json
             build/chrome-report.md
+            build/preserved-check.txt
           if-no-files-found: warn
           retention-days: 14
