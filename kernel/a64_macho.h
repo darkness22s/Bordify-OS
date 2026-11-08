@@ -19,6 +19,12 @@ typedef struct {
     int exit_code;
     uint32_t steps;
     uint32_t unsupported_opcode;
+    uint32_t objc_linked_calls;
+    bool cocoa_window_created;
+    bool cocoa_window_visible;
+    bool cocoa_window_title_set;
+    bool cocoa_application_started;
+    bool cocoa_application_terminated;
 } a64_report_t;
 
 /* Original strict Bordify-only SVC ABI. */
@@ -26,7 +32,8 @@ bool a64_macho_run(const uint8_t *file, size_t file_size,
                    uint8_t *guest, size_t guest_size,
                    a64_output_t output, void *context,
                    a64_report_t *report);
-/* Opt-in ARM64 Darwin write/exit/getpid + limited ObjC shim. */
+/* Opt-in ARM64 Darwin write/exit/getpid + limited ObjC shim and
+ * explicitly declared BORDIFY-OBJC LC_NOTE import stub table. */
 bool a64_macho_run_darwin(const uint8_t *file, size_t file_size,
                           uint8_t *guest, size_t guest_size,
                           a64_output_t output, void *context,
