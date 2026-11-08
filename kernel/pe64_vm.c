@@ -11,6 +11,15 @@
 #define IMAGE_LIMIT 0x8000u
 #define STACK_RVA 0xf000u
 #define STDOUT_HANDLE 1u
+#define INSTALL_HANDLE 0x100u
+#define MAX_INSTALL_BYTES 8192u
+/* Single-process audited installer staging. Never a guest-mapped pointer. */
+static struct {
+    uint8_t bytes[MAX_INSTALL_BYTES];
+    size_t length;
+    bool open;
+    bool committed;
+} install_state;
 
 static uint16_t u16(const uint8_t *p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
@@ -47,6 +56,8 @@ static uint64_t imported_api(const uint8_t *mem, size_t n, uint32_t at) {
     if (has_name(mem, n, at, "WriteFile")) return STUB_BASE + 2;
     if (has_name(mem, n, at, "ExitProcess")) return STUB_BASE + 3;
     if (has_name(mem, n, at, "GetLastError")) return STUB_BASE + 4;
+    if (has_name(mem, n, at, "CreateFileA")) return STUB_BASE + 5;
+    if (has_name(mem, n, at, "CloseHandle")) return STUB_BASE + 6;
     return 0;
 }
 static bool off64(uint64_t guest, size_t size, size_t n, size_t *out) {
@@ -147,18 +158,23 @@ static bool stage(const uint8_t *file, size_t file_size, uint8_t *mem,
     return true;
 }
 
-bool pe64_vm_run(const uint8_t *file, size_t length,
-                 uint8_t *memory, size_t memory_bytes,
-                 pe64_output_t output, void *ctx,
-                 pe64_report_t *report) {
+static bool pe64_vm_run_internal(const uint8_t *file, size_t length,
+                                 uint8_t *memory, size_t memory_bytes,
+                                 pe64_output_t output, void *ctx,
+                                 pe64_install_commit_t commit, void *commit_ctx,
+                                 pe64_report_t *report) {
     if (!report) return false;
     report->finished=false; report->exit_code=-1;
     report->steps=0; report->imports=0; report->rejected_opcode=0;
+    report->installed_bytes=0;
+    install_state.length=0;
+    install_state.open=false;
+    install_state.committed=false;
     if (!file || !memory || !output) return false;
     uint32_t ip=0;
     if (!stage(file,length,memory,memory_bytes,&ip,&report->imports))
         return false;
-    uint64_t rcx=0,rdx=0,r8=0,r9=0,rax=0;
+    uint64_t rcx=0,rdx=0,r8=0,r9=0,rax=0,rbx=0;
     uint64_t rsp=PE64_GUEST_BASE+STACK_RVA;
     for (uint32_t step=0;step<PE64_MAX_STEPS;++step) {
         if (!fits(memory_bytes,ip,2) || ip >= IMAGE_LIMIT) return false;
@@ -168,6 +184,17 @@ bool pe64_vm_run(const uint8_t *file, size_t length,
         if (fits(memory_bytes,ip,7) &&
             p[0]==0x48 && p[1]==0xc7 && p[2]==0xc1) {
             rcx=(uint64_t)(int64_t)(int32_t)u32(p+3);ip+=7;continue;
+        }
+        /* 48 8D 0D disp32: lea rcx,[rip+disp32] */
+        if (fits(memory_bytes,ip,7) &&
+            p[0]==0x48 && p[1]==0x8d && p[2]==0x0d) {
+            int64_t addr=(int64_t)(PE64_GUEST_BASE+ip+7)+(int32_t)u32(p+3);
+            if (addr<(int64_t)PE64_GUEST_BASE) return false;
+            rcx=(uint64_t)addr;ip+=7;continue;
+        }
+        /* BA imm32: mov edx,imm32 (zero extends to RDX). */
+        if (fits(memory_bytes,ip,5) && p[0]==0xba) {
+            rdx=u32(p+1);ip+=5;continue;
         }
         /* 48 8D 15 disp32: lea rdx,[rip+disp32] */
         if (fits(memory_bytes,ip,7) &&
@@ -187,6 +214,15 @@ bool pe64_vm_run(const uint8_t *file, size_t length,
             p[0]==0x48 && p[1]==0x89 && p[2]==0xc1) {
             rcx=rax;ip+=3;continue; /* mov rcx,rax */
         }
+        /* Handle kept in RBX across an imported call (callee-saved). */
+        if (fits(memory_bytes,ip,3) &&
+            p[0]==0x48 && p[1]==0x89 && p[2]==0xc3) {
+            rbx=rax;ip+=3;continue;
+        }
+        if (fits(memory_bytes,ip,3) &&
+            p[0]==0x48 && p[1]==0x89 && p[2]==0xd9) {
+            rcx=rbx;ip+=3;continue;
+        }
         if (fits(memory_bytes,ip,4) && p[0]==0x48 &&
             p[1]==0x83 && p[2]==0xec) {
             uint64_t amount=p[3];
@@ -199,11 +235,12 @@ bool pe64_vm_run(const uint8_t *file, size_t length,
             if (rsp>PE64_GUEST_BASE+PE64_GUEST_BYTES) return false;
             ip+=4;continue;
         }
-        /* C7 44 24 20 imm32: fifth Win64 stack argument */
+        /* C7 44 24 XX imm32: Win64 stack args (5th,6th,7th). */
         if (fits(memory_bytes,ip,8) && p[0]==0xc7 &&
-            p[1]==0x44 && p[2]==0x24 && p[3]==0x20) {
+            p[1]==0x44 && p[2]==0x24 &&
+            (p[3]==0x20 || p[3]==0x28 || p[3]==0x30)) {
             size_t offset;
-            if (!off64(rsp+32,memory_bytes,4,&offset)) return false;
+            if (!off64(rsp+p[3],memory_bytes,4,&offset)) return false;
             uint32_t v=u32(p+4);
             for (unsigned j=0;j<4;++j) memory[offset+j]=(uint8_t)(v>>(8*j));
             ip+=8;continue;
@@ -217,20 +254,55 @@ bool pe64_vm_run(const uint8_t *file, size_t length,
             uint64_t api=u64(memory+rva);
             if (api==STUB_BASE+1) {
                 rax=(rcx==(uint64_t)(int64_t)-11) ? STDOUT_HANDLE : 0;
-            } else if (api==STUB_BASE+2) {
+            } else if (api==STUB_BASE+2) { /* WriteFile */
                 size_t data_offset, stack_offset;
-                if (rcx!=STDOUT_HANDLE || r8>256 ||
-                    !off64(rdx,memory_bytes,(size_t)r8,&data_offset) ||
+                if (!off64(rdx,memory_bytes,(size_t)r8,&data_offset) ||
                     !off64(rsp+32,memory_bytes,4,&stack_offset) ||
                     r9!=0 || u32(memory+stack_offset)!=0) return false;
-                output(memory+data_offset,(size_t)r8,ctx);
+                if (rcx==STDOUT_HANDLE) {
+                    if (r8>256) return false;
+                    output(memory+data_offset,(size_t)r8,ctx);
+                } else if (rcx==INSTALL_HANDLE && commit &&
+                           install_state.open) {
+                    if (r8>MAX_INSTALL_BYTES-install_state.length) return false;
+                    for (size_t k=0;k<(size_t)r8;++k)
+                        install_state.bytes[install_state.length+k]=
+                            memory[data_offset+k];
+                    install_state.length+=(size_t)r8;
+                } else return false;
                 rax=1;
             } else if (api==STUB_BASE+3) {
+                if (commit && (!install_state.committed ||
+                    install_state.open)) return false;
                 report->finished=true;
                 report->exit_code=(int)(int32_t)rcx;
                 return true;
             } else if (api==STUB_BASE+4) {
                 rax=0;
+            } else if (api==STUB_BASE+5) { /* CreateFileA */
+                size_t name_offset, stack_offset;
+                if (!commit || install_state.open ||
+                    install_state.committed || rdx!=0x40000000ULL ||
+                    r8!=0 || r9!=0 ||
+                    !off64(rcx,memory_bytes,16,&name_offset) ||
+                    !off64(rsp+32,memory_bytes,20,&stack_offset) ||
+                    u32(memory+stack_offset)!=2 ||
+                    u32(memory+stack_offset+8)!=0x80 ||
+                    u32(memory+stack_offset+16)!=0 ||
+                    !has_name(memory,memory_bytes,(uint32_t)name_offset,
+                              "C:\\APP64.EXE")) return false;
+                install_state.open=true;
+                install_state.length=0;
+                rax=INSTALL_HANDLE;
+            } else if (api==STUB_BASE+6) { /* CloseHandle */
+                if (!commit || rcx!=INSTALL_HANDLE ||
+                    !install_state.open || !install_state.length ||
+                    !commit(install_state.bytes,install_state.length,commit_ctx))
+                    return false;
+                install_state.open=false;
+                install_state.committed=true;
+                report->installed_bytes=(uint32_t)install_state.length;
+                rax=1;
             } else return false;
             ip+=6;continue;
         }
@@ -238,4 +310,21 @@ bool pe64_vm_run(const uint8_t *file, size_t length,
         return false;
     }
     return false;
+}
+
+bool pe64_vm_run(const uint8_t *file, size_t length,
+                 uint8_t *memory, size_t memory_bytes,
+                 pe64_output_t output, void *ctx,
+                 pe64_report_t *report) {
+    return pe64_vm_run_internal(file,length,memory,memory_bytes,
+                                output,ctx,NULL,NULL,report);
+}
+bool pe64_vm_run_install(const uint8_t *file, size_t length,
+                         uint8_t *memory, size_t memory_bytes,
+                         pe64_output_t output, void *context,
+                         pe64_install_commit_t commit, void *commit_context,
+                         pe64_report_t *report) {
+    if (!commit) return false;
+    return pe64_vm_run_internal(file,length,memory,memory_bytes,
+                                output,context,commit,commit_context,report);
 }
