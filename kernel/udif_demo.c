@@ -2,6 +2,7 @@
 #include "fat16.h"
 #include "package_inspect.h"
 #include "udif_blkx.h"
+#include "hfsplus_probe.h"
 #include "printf.h"
 #include "string.h"
 
@@ -57,6 +58,49 @@ static bool read_test_sector(const char *name, const char *marker,
     return kmemcmp(first, marker, marker_len) == 0;
 }
 
+
+/*
+ * End-to-end compressed DMG -> UDIF block map -> HFS+ volume header.
+ * The fixture is only a filesystem HEADER; no directory catalog is mounted.
+ */
+static bool probe_hfsplus_volume(void) {
+    fat_entry_t apps, dmg;
+    if (!fat16_mounted() || !fat16_find(0, "APPS", &apps) ||
+        !fat16_find(apps.cluster, "HFSPLUS.DMG", &dmg) ||
+        dmg.size < 512) return false;
+
+    uint8_t trailer[512];
+    if (fat16_read_range(apps.cluster, dmg.name, dmg.size - 512,
+                         trailer, sizeof(trailer)) != 512) return false;
+    package_info_t package;
+    if (!package_inspect_dmg_trailer(trailer, sizeof(trailer), dmg.size,
+                                    &package) || !package.valid ||
+        package.metadata_length == 0 || package.metadata_length > 4096 ||
+        package.metadata_offset > UINT32_MAX) return false;
+
+    static char xml[4096];
+    if (fat16_read_range(apps.cluster, dmg.name,
+                         (uint32_t)package.metadata_offset, xml,
+                         (uint32_t)package.metadata_length) !=
+        (int)package.metadata_length) return false;
+    static udif_block_map_t map;
+    if (!udif_blkx_from_xml(xml, (size_t)package.metadata_length,
+                            package.data_offset, dmg.size, &map) ||
+        map.sector_count < 3) return false;
+
+    file_reader_t file = {apps.cluster, dmg.name, dmg.size};
+    uint8_t header[512];
+    if (udif_blkx_read_sector(&map, map.sector_start + 2,
+                              file_read, &file, header) != UDIF_IO_OK)
+        return false;
+    hfsplus_volume_info_t info;
+    return hfsplus_probe_header(header, sizeof(header),
+                                map.sector_count, &info) &&
+           !info.case_sensitive && info.journaled &&
+           info.block_size == 4096 && info.total_blocks == 8 &&
+           info.catalog_first_block == 2;
+}
+
 void udif_demo_probe(void) {
     static const char raw[] = "BORDIFY_DMG_RAW_SECTOR_READ_OK!!";
     static const char zipped[] = "BORDIFY_DMG_ZLIB_SECTOR_VERIFIED!";
@@ -68,4 +112,8 @@ void udif_demo_probe(void) {
         kprintf("[dmg] zlib compressed UDIF sector verified in QEMU\n");
     else
         kprintf("[dmg] zlib sector probe failed\n");
+    if (probe_hfsplus_volume())
+        kprintf("[hfsplus] compressed DMG HFS+ volume header verified in QEMU\n");
+    else
+        kprintf("[hfsplus] compressed DMG header probe failed\n");
 }
