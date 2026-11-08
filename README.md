@@ -37,6 +37,21 @@ user-mode NAT address range. HTTP and HTTPS (TLS 1.2) are supported.
 `SYSTEM/SETTINGS.CFG`. It also shows kernel, memory, display, disk, clock
 and uptime information, plus Restart and Power off controls.
 
+## Experimental cross-platform compatibility (development branch only)
+
+The draft compatibility branch includes a real isolated ELF32 demo
+(`APPS/HELLO.ELF`), a tiny Windows PE32 console executable
+(`APPS/WINHELLO.EXE`) using four limited `kernel32.dll` bridges,
+a small **interpreted** Apple Silicon Mach-O demonstration
+(`APPS/ARMHELLO.MCH`), and read-only raw/zero-sector extraction from
+a synthetic UDIF image (`APPS/DMGDEMO.DMG`). All four are checked by
+QEMU CI. The ARM64 guest demo uses a **custom test ABI**, not Darwin.
+
+This **does not** run Windows x64 installers or arbitrary .exe files,
+mount or install real macOS DMGs, run real Apple Silicon apps, or supply
+Darwin/Cocoa. Untrusted applications must not be launched by this
+early-stage kernel. [Details and compatibility gates](docs/application-compatibility.md).
+
 ## Download and run
 
 Prebuilt images are attached to the [latest release](https://github.com/darkness22s/Bordify-OS/releases/latest):
@@ -80,8 +95,9 @@ controller, keep the default NAT adapter, and start it.
 CI is the canonical build path. The image workflow installs the 32-bit GCC
 toolchain, NASM, GRUB, dosfstools, parted and QEMU image tools, compiles
 the kernel, creates the FAT16 filesystem, installs GRUB, and uploads the
-disk images. The pipeline compiles and packages only; it does not boot or
-run the operating system in CI.
+disk images. On the experimental compatibility branch, CI also boots the OS in QEMU,
+runs native ELF32, a restricted Windows PE32 console demo and an interpreted
+ARM64 Mach-O demo, and checks uncompressed DMG sector reads.
 
 The build is split into two commands:
 
