@@ -5,7 +5,7 @@
 
 /* Read-only HFS+ filesystem subset backed by UDIF sector callbacks.
  * Scope: 512-byte catalog B-tree leaf, root directory file key,
- * inline first data-fork extent (no overflow B-tree), UTF-16BE ASCII names.
+ * a complete single data-fork extent (no overflow B-tree), UTF-16BE ASCII names.
  * No decompression of HFS+ file compression, hard links, ACL, or writes.
  */
 #define HFSPLUS_MAX_EXTRACT (16u * 1024u)
@@ -37,7 +37,7 @@ bool hfsplus_mount_readonly(hfsplus_mount_t *mount,
                              const udif_block_map_t *map,
                              udif_reader_t reader, void *context);
 /* Find a root-directory file record, return direct first extent metadata.
- * Unsupported catalog B-trees and compressed/symlink files fail closed. */
+ * Unsupported catalog B-trees, fragmented forks and unsupported files fail closed. */
 bool hfsplus_find_root_file(const hfsplus_mount_t *mount,
                             const char *name, hfsplus_file_t *file);
 /* Read file bytes through the read-only UDIF sector reader.
