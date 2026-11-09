@@ -20,10 +20,16 @@ $(OUT)/bordify-shell: $(SOURCES) ../kernel/gfx.h ../kernel/desktop.h
 	  -fno-builtin -DBORDIFY_LINUX -I../kernel $(SDL_CFLAGS) \
 	  $(SOURCES) $(SDL_LIBS) -o $@
 
-test: all
+$(OUT)/settings-test: tests/settings_persistence.c host.c ../kernel/settings.c ../kernel/string.c
+	$(CC) -std=gnu11 -O2 -Wall -Wextra -Werror -fno-builtin -DBORDIFY_LINUX \
+	  -I../kernel tests/settings_persistence.c host.c ../kernel/settings.c \
+	  ../kernel/string.c -o $@
+
+test: all $(OUT)/settings-test
 	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy BORDIFY_SMOKE_FRAMES=4 \
 	  BORDIFY_SMOKE_BMP=$(OUT)/desktop.bmp $(OUT)/bordify-shell
 	$(PYTHON) tests/check_desktop.py $(OUT)/desktop.bmp
+	@dir=$(mktemp -d); HOME="$dir" $(OUT)/settings-test; code=$?; rm -rf "$dir"; exit $code
 
 clean:
-	rm -f $(OUT)/bordify-shell $(OUT)/desktop.bmp
+	rm -f $(OUT)/bordify-shell $(OUT)/desktop.bmp $(OUT)/settings-test
