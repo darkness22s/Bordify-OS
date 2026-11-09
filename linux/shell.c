@@ -108,7 +108,23 @@ void linux_idle(void) {
             default: break;
         }
     }
-    if (smoke_frames && ++frames >= smoke_frames) {
+    ++frames;
+    /* Deterministic end-to-end GUI interaction tests, disabled for normal use. */
+    if (smoke_frames && getenv("BORDIFY_SMOKE_INTERACT")) {
+        int x = 0, y = 0;
+        bool down = true;
+        switch (frames) {
+            case 2: x = 413; y = 288; break; /* Settings > Night */
+            case 3: x = 413; y = 288; down = false; break;
+            case 4: x = 291; y = 380; break; /* Settings > Grid */
+            case 5: x = 291; y = 380; down = false; break;
+            case 6: x = 279; y = 474; break; /* Settings > Red */
+            case 7: x = 279; y = 474; down = false; break;
+            default: break;
+        }
+        if (x) { mouse.x = x; mouse.y = y; mouse.left = down; }
+    }
+    if (smoke_frames && frames >= smoke_frames) {
         save_smoke_frame();
         exit(0);
     }
@@ -141,6 +157,12 @@ int main(void) {
     gfx_init((uintptr_t)pixels, (uint32_t)(width * 4), width, height);
     if (!settings_load()) settings_defaults();
     gui_init();
+    const char *test_open = smoke_frames ? getenv("BORDIFY_SMOKE_OPEN") : NULL;
+    if (test_open) {
+        if (!strcmp(test_open, "files")) enqueue(KEY_F1, 0);
+        else if (!strcmp(test_open, "web")) enqueue(KEY_F2, 0);
+        else if (!strcmp(test_open, "settings")) enqueue(KEY_F3, 0);
+    }
     desktop_run();
     return 0;
 }
