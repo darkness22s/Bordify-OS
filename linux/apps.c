@@ -44,7 +44,7 @@ static void files_click(gui_window_t *w, int mx, int my) {
     if (ui_point_in(x + 218, y, 220, 42, mx, my))
         spawn("bordify-choose-app", "--choose");
     if (ui_point_in(x + 218, y + 54, 220, 42, mx, my))
-        spawn("bordify-choose-app", "--choose");
+        spawn("bordify-choose-app", "--dmg");
 }
 static void web_draw(gui_window_t *w) {
     int x = gui_content_x(w) + 30, y = gui_content_y(w) + 130;
