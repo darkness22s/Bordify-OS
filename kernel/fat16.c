@@ -584,15 +584,23 @@ int fat16_list(uint16_t dir_cluster, fat_entry_t *entries, int max_entries) {
 }
 
 bool fat16_find(uint16_t dir_cluster, const char *name, fat_entry_t *entry) {
-    fat_entry_t list[128];
-    int count = fat16_list(dir_cluster, list, 128);
-    for (int i = 0; i < count; i++) {
-        if (kstricmp(list[i].name, name) == 0) {
-            if (entry) {
-                *entry = list[i];
-            }
-            return true;
-        }
+    if (!mounted || !name || !*name || !load_directory(dir_cluster))
+        return false;
+    char wanted[11];
+    fat16_name_to_83(name,wanted);
+    /* Do not sort or materialize 128 directory entries on the 16-KiB
+     * ring-3 syscall kernel stack for a single FAT16 filename lookup.
+     * The older list-based lookup also silently hid entries beyond #128.
+     * Scan the bounded on-disk directory buffer directly, skipping
+     * deleted/LFN/volume records exactly as the FAT16 reader does. */
+    for (uint32_t offset=0;offset+32u<=dir_buffer_size;offset+=32u) {
+        const raw_dir_entry_t *raw=
+            (const raw_dir_entry_t *)(const void *)(dir_buffer+offset);
+        if (raw->name[0]==0) break;
+        if (raw->attr&FAT_ATTR_VOLUME_ID) continue;
+        if (!entry_matches(raw,wanted)) continue;
+        if (entry) entry_from_raw(raw,offset,entry);
+        return true;
     }
     return false;
 }
