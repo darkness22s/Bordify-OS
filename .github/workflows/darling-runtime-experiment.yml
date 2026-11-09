@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euxo pipefail
           test "$(find build/darling/release -type f -name '*.deb' | wc -l)" -gt 0
-          find build/darling/release -type f -name '*.deb' -print0 |
+          find build/darling/release -type f -name '*.deb' -printf './%p\0' |
             xargs -0 -r sudo apt-get install -y --no-install-recommends
           command -v darling
       - name: Execute real Darwin programs through Darling (not a parser fixture)
