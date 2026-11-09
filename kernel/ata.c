@@ -38,6 +38,18 @@ static bool wait_command_complete(uint32_t timeout) {
     return status!=0xff && (status&(ATA_SR_ERR|ATA_SR_DF))==0;
 }
 
+/* After the final PIO word, both BSY and DRQ must drop. Waiting only
+ * for !BSY permits issuing a new command while a prior data phase is
+ * still active (which intermittently broke FAT16 directory writes). */
+static bool wait_data_phase_complete(uint32_t timeout) {
+    while(timeout--) {
+        uint8_t status=inb(ATA_PRIMARY_IO+7);
+        if (status&(ATA_SR_ERR|ATA_SR_DF)) return false;
+        if ((status&(ATA_SR_BSY|ATA_SR_DRQ))==0) return true;
+    }
+    return false;
+}
+
 static int wait_drq(uint32_t timeout) {
     while (timeout--) {
         uint8_t status = inb(ATA_PRIMARY_IO + 7);
@@ -96,7 +108,7 @@ bool ata_present(void) {
     return present;
 }
 
-bool ata_read_sectors(uint32_t lba, uint8_t count, void *buffer) {
+static bool ata_read_once(uint32_t lba, uint8_t count, void *buffer) {
     if (!present || !buffer || !valid_lba28(lba,count)) {
         return false;
     }
@@ -123,11 +135,25 @@ bool ata_read_sectors(uint32_t lba, uint8_t count, void *buffer) {
             out[sector * 256 + i] = inw(ATA_PRIMARY_IO);
         }
     }
+    bool complete=wait_data_phase_complete(2000000);
     irq_restore(irq);
-    return true;
+    return complete;
 }
 
-bool ata_write_sectors(uint32_t lba, uint8_t count, const void *buffer) {
+bool ata_read_sectors(uint32_t lba,uint8_t count,void *buffer) {
+    if (!present || !buffer || !valid_lba28(lba,count)) return false;
+    for(unsigned attempt=0;attempt<3u;++attempt) {
+        if (ata_read_once(lba,count,buffer)) return true;
+#ifdef BORDIFY_CHROME_PROBE
+        kprintf("[ata-retry] read lba=%u count=%u attempt=%u\n",
+                lba,(unsigned)count,attempt+1u);
+#endif
+        io_wait();
+    }
+    return false;
+}
+
+static bool ata_write_once(uint32_t lba, uint8_t count, const void *buffer) {
     if (!present || !buffer || !valid_lba28(lba,count)) {
         return false;
     }
@@ -155,7 +181,7 @@ bool ata_write_sectors(uint32_t lba, uint8_t count, const void *buffer) {
         }
     }
     /* The final PIO data block must finish before FLUSH CACHE. */
-    if (!wait_command_complete(2000000)) {
+    if (!wait_data_phase_complete(2000000)) {
         irq_restore(irq);
         return false;
     }
@@ -163,6 +189,21 @@ bool ata_write_sectors(uint32_t lba, uint8_t count, const void *buffer) {
     bool flushed=wait_command_complete(2000000);
     irq_restore(irq);
     return flushed;
+}
+
+bool ata_write_sectors(uint32_t lba,uint8_t count,const void *buffer) {
+    if (!present || !buffer || !valid_lba28(lba,count)) return false;
+    /* A full-sector PIO write is idempotent: retry the entire command
+     * rather than treating a partial transfer as a committed FAT write. */
+    for(unsigned attempt=0;attempt<3u;++attempt) {
+        if (ata_write_once(lba,count,buffer)) return true;
+#ifdef BORDIFY_CHROME_PROBE
+        kprintf("[ata-retry] write lba=%u count=%u attempt=%u\n",
+                lba,(unsigned)count,attempt+1u);
+#endif
+        io_wait();
+    }
+    return false;
 }
 
 bool ata_flush(void) {
