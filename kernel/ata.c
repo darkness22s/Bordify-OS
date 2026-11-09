@@ -10,6 +10,15 @@
 #define ATA_SR_DF 0x20
 #define ATA_SR_DRQ 0x08
 #define ATA_SR_ERR 0x01
+#define ATA_LBA28_SECTORS 0x10000000u
+
+/* ATA PIO reports completion separately from each data-ready phase.
+ * A write is not committed until BSY clears and a subsequent cache flush
+ * has completed without ERR/DF. Never report a failed write as success. */
+static bool valid_lba28(uint32_t lba,uint8_t sectors) {
+    return sectors>0 && lba<ATA_LBA28_SECTORS &&
+           (uint32_t)sectors<=ATA_LBA28_SECTORS-lba;
+}
 
 static bool present;
 
@@ -21,6 +30,12 @@ static int wait_not_busy(uint32_t timeout) {
         }
     }
     return -1;
+}
+
+static bool wait_command_complete(uint32_t timeout) {
+    if (wait_not_busy(timeout)<0) return false;
+    uint8_t status=inb(ATA_PRIMARY_IO+7);
+    return status!=0xff && (status&(ATA_SR_ERR|ATA_SR_DF))==0;
 }
 
 static int wait_drq(uint32_t timeout) {
@@ -82,7 +97,7 @@ bool ata_present(void) {
 }
 
 bool ata_read_sectors(uint32_t lba, uint8_t count, void *buffer) {
-    if (!present || count == 0) {
+    if (!present || !buffer || !valid_lba28(lba,count)) {
         return false;
     }
     uint32_t irq = irq_save();
@@ -113,7 +128,7 @@ bool ata_read_sectors(uint32_t lba, uint8_t count, void *buffer) {
 }
 
 bool ata_write_sectors(uint32_t lba, uint8_t count, const void *buffer) {
-    if (!present || count == 0) {
+    if (!present || !buffer || !valid_lba28(lba,count)) {
         return false;
     }
     uint32_t irq = irq_save();
@@ -139,16 +154,26 @@ bool ata_write_sectors(uint32_t lba, uint8_t count, const void *buffer) {
             outw(ATA_PRIMARY_IO, in[sector * 256 + i]);
         }
     }
-    outb(ATA_PRIMARY_IO + 7, 0xE7);
-    (void)wait_not_busy(2000000);
-    irq_restore(irq);
-    return true;
-}
-
-bool ata_flush(void) {
-    if (!present) {
+    /* The final PIO data block must finish before FLUSH CACHE. */
+    if (!wait_command_complete(2000000)) {
+        irq_restore(irq);
         return false;
     }
     outb(ATA_PRIMARY_IO + 7, 0xE7);
-    return wait_not_busy(2000000) == 0;
+    bool flushed=wait_command_complete(2000000);
+    irq_restore(irq);
+    return flushed;
+}
+
+bool ata_flush(void) {
+    if (!present) return false;
+    uint32_t irq=irq_save();
+    if (!wait_command_complete(2000000)) {
+        irq_restore(irq);
+        return false;
+    }
+    outb(ATA_PRIMARY_IO+7,0xE7);
+    bool ok=wait_command_complete(2000000);
+    irq_restore(irq);
+    return ok;
 }
