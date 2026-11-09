@@ -68,6 +68,11 @@ int main(int argc,char **argv) {
     assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                               0x40180000u,&info));
     assert(info.guest_base==0x40180000u);
+    /* A high guest base must not wrap exports into low/kernel addresses. */
+    assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                               0xfffff000u,&info));
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
     assert(win32_pe_dll_resolve(memory,&info,"BordifyAdd",0u)==0x40181200u);
     assert(win32_pe_dll_resolve(memory,&info,NULL,1u)==0x40181200u);
     assert(info.entry_rva==0u);
