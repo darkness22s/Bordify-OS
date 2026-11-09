@@ -41,7 +41,15 @@ $(BUILD)/apps/bordll.dll: apps/win32_testdll.c
 	@mkdir -p $(BUILD)/apps
 	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
 	  -Wl,--entry,0 -Wl,--image-base,0x10000000 \
-	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias -o $@ $<
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
+	  -Wl,--out-implib,$(BUILD)/apps/libbordll.a -o $@ $<
+
+$(BUILD)/apps/chain.dll: apps/win32_chaindll.c $(BUILD)/apps/bordll.dll
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,0 -Wl,--image-base,0x11000000 \
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
+	  -L$(BUILD)/apps -o $@ $< -lbordll
 
 $(BUILD)/apps/winreal.exe: apps/win32_realc.c
 	@mkdir -p $(BUILD)/apps

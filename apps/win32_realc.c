@@ -131,6 +131,29 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
                   (DWORD)sizeof(dll_message)-1u,&dll_written,0) ||
        dll_written!=(DWORD)sizeof(dll_message)-1u)ExitProcess(85u);
 
+    /* A genuine import graph: CHAIN.DLL's PE import table references
+     * BORDLL.DLL; releasing CHAIN must drop its strong dependency ref. */
+    HMODULE chain=LoadLibraryA("CHAIN.DLL");
+    if(!chain)ExitProcess(86u);
+    HMODULE child=GetModuleHandleW(L"bordll.dll");
+    if(!child || child==chain)ExitProcess(87u);
+    FARPROC link_fn=GetProcAddress(chain,"BordifyChain");
+    if(!link_fn)ExitProcess(88u);
+    DWORD (WINAPI *linked)(DWORD)=(DWORD (WINAPI *)(DWORD))link_fn;
+    if(linked(7u)!=135u)ExitProcess(89u);
+    if(!FreeLibrary(chain))ExitProcess(90u);
+    if(GetModuleHandleA("bordll.dll") ||
+       GetLastError()!=ERROR_MOD_NOT_FOUND)ExitProcess(91u);
+    if(FreeLibrary(child) ||
+       GetLastError()!=ERROR_INVALID_HANDLE)ExitProcess(92u);
+    static const char chain_message[]=
+        "BORDIFY CHAINED DLL: imported MinGW export executed in ring 3\r\n";
+    DWORD chain_written=0;
+    if(!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),chain_message,
+                  (DWORD)sizeof(chain_message)-1u,&chain_written,0) ||
+       chain_written!=(DWORD)sizeof(chain_message)-1u)
+        ExitProcess(93u);
+
     HANDLE output=GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD written=0;
     DWORD length=(DWORD)(sizeof(message)-1u);

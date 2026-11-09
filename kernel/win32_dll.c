@@ -80,195 +80,299 @@ static uint32_t fail(win32_dll_t *dll,uint32_t error) {
     if(dll)dll->last_error=error;
     return 0;
 }
-void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
-                    uint32_t base,size_t bytes) {
-    if(!dll)return;
-    dll->guest=guest;dll->base=base;dll->bytes=bytes;
-    dll->last_error=0;
-    dll->refs[0]=0;dll->refs[1]=0;
-    dll->pinned[0]=false;dll->pinned[1]=false;
-    dll->vm=NULLPTR;dll->reader=NULLPTR;dll->reader_context=NULLPTR;
-    dll->image_handle=0u;dll->image_refs=0u;
-    dll->image_name[0]=0;dll->image_info.image_size=0u;
-    dll->image_info.guest_base=0u;dll->image_info.export_rva=0u;
-    dll->image_info.export_size=0u;
-}
-static int module_id(uint32_t handle) {
-    if(handle==WIN32_DLL_KERNEL32_HANDLE)return 0;
-    if(handle==WIN32_DLL_MSVCRT_HANDLE)return 1;
-    return -1;
-}
-static int module_by_name(const char *name) {
+/* Each process has a tiny bounded import graph with strong references.
+ * A transient image never becomes visible to GetModuleHandle or
+ * GetProcAddress until every IAT entry is validated and resolved. */
+static int builtin_by_name(const char *name) {
     if(equals_ci(name,"kernel32.dll")||equals_ci(name,"kernel32"))return 0;
     if(equals_ci(name,"msvcrt.dll")||equals_ci(name,"msvcrt"))return 1;
     return -1;
 }
-void win32_dll_pin_imports(win32_dll_t *dll,uint32_t mask) {
-    if(!dll)return;
-    dll->pinned[0]=(mask&1u)!=0u;
-    dll->pinned[1]=(mask&2u)!=0u;
+static int builtin_by_handle(uint32_t handle) {
+    if(handle==WIN32_DLL_KERNEL32_HANDLE)return 0;
+    if(handle==WIN32_DLL_MSVCRT_HANDLE)return 1;
+    return -1;
 }
-/* Keep PE DLL file selection limited to a DOS 8.3 DLL basename; no path
- * traversal, Unicode normalization, drive letters or DLL search path. */
+static uint32_t builtin_symbol(int id,const char *name,uint32_t ordinal) {
+    if(!name || ordinal)return 0u;
+    const export_t *list=id==0?kernel32_exports:msvcrt_exports;
+    size_t count=id==0?sizeof(kernel32_exports)/sizeof(export_t):
+                       sizeof(msvcrt_exports)/sizeof(export_t);
+    for(size_t i=0;i<count;++i)
+        if(equals_exact(name,list[i].name))
+            return WIN32_PE_USER_BASE+WIN32_PE_RUNTIME_OFFSET+
+                   (uint32_t)list[i].slot*WIN32_PE_BRIDGE_SLOT;
+    return 0u;
+}
+/* No slash, colon, path traversal or long filename support. */
 static bool valid_dll_basename(const char *name) {
     if(!name)return false;
     unsigned i=0;
     while(name[i] && name[i]!='.') {
         char c=name[i];
         if(i>=8u || !((c>='A'&&c<='Z')||(c>='a'&&c<='z')||
-                        (c>='0'&&c<='9')||c=='_'||c=='-'))
+                       (c>='0'&&c<='9')||c=='_'||c=='-'))
             return false;
         ++i;
     }
-    if(!i || name[i]!='.')return false;
-    return equals_ci(name+i,".dll");
+    return i!=0u && name[i]=='.' && equals_ci(name+i,".dll");
+}
+static void clear_module(win32_dll_image_t *m) {
+    m->state=0;m->handle=0;m->refs=0;m->dep_refs=0;
+    m->image_deps=0;m->builtin_deps=0;m->name[0]=0;
+    m->info.image_size=0;m->info.guest_base=0;
+    m->info.export_rva=0;m->info.export_size=0;
+    m->info.import_rva=0;m->info.import_size=0;
+}
+void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
+                    uint32_t base,size_t bytes) {
+    if(!dll)return;
+    dll->guest=guest;dll->base=base;dll->bytes=bytes;dll->last_error=0;
+    dll->refs[0]=0;dll->refs[1]=0;
+    dll->pinned[0]=false;dll->pinned[1]=false;
+    dll->builtin_dep_refs[0]=0;dll->builtin_dep_refs[1]=0;
+    dll->vm=NULLPTR;dll->reader=NULLPTR;dll->reader_context=NULLPTR;
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+        clear_module(&dll->images[i]);
+}
+void win32_dll_pin_imports(win32_dll_t *dll,uint32_t mask) {
+    if(!dll)return;
+    dll->pinned[0]=(mask&1u)!=0u;
+    dll->pinned[1]=(mask&2u)!=0u;
 }
 void win32_dll_set_reader(win32_dll_t *dll,win32_vm_t *vm,
                           win32_dll_reader_t reader,void *context) {
     if(!dll)return;
-    dll->vm=vm;
-    dll->reader=reader;
-    dll->reader_context=context;
+    dll->vm=vm;dll->reader=reader;dll->reader_context=context;
 }
+static int slot_by_name(const win32_dll_t *dll,const char *name) {
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+        if(dll->images[i].state &&
+           equals_ci(name,dll->images[i].name))return (int)i;
+    return -1;
+}
+static int slot_by_handle(const win32_dll_t *dll,uint32_t handle) {
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+        if(dll->images[i].state==2u &&
+           dll->images[i].handle==handle)return (int)i;
+    return -1;
+}
+static void unload_slot(win32_dll_t *dll,unsigned slot) {
+    if(slot>=WIN32_DLL_MAX_IMAGES)return;
+    win32_dll_image_t *m=&dll->images[slot];
+    if(m->state!=2u && m->state!=1u)return;
+    uint8_t real_deps=m->image_deps,builtin_deps=m->builtin_deps;
+    uint32_t handle=m->handle;
+    clear_module(m);
+    if(handle && dll->vm)win32_vm_free_module(dll->vm,handle);
+    for(unsigned i=0;i<2u;++i)
+        if((builtin_deps&(1u<<i)) && dll->builtin_dep_refs[i])
+            --dll->builtin_dep_refs[i];
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+        if((real_deps&(1u<<i)) && dll->images[i].dep_refs) {
+            --dll->images[i].dep_refs;
+            if(!dll->images[i].refs && !dll->images[i].dep_refs)
+                unload_slot(dll,i);
+        }
+}
+/* Reentrant because a DLL may import another DLL. The staging buffer is
+ * consumed and copied into guest memory BEFORE resolving dependencies. */
 static uint8_t file_staging[WIN32_PE_DLL_MAX_BYTES];
-static uint32_t load_name(win32_dll_t *dll,const char *name) {
-    int id=module_by_name(name);
-    if(id>=0) {
-        if(dll->refs[id]==65535u)return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-        dll->refs[id]++;
+typedef struct {
+    win32_dll_t *dll;
+    unsigned parent;
+} link_context_t;
+static uint32_t load_name_mode(win32_dll_t *dll,const char *name,bool dependency);
+static uint32_t import_symbol(void *context,const char *module,
+                              const char *symbol,uint32_t ordinal) {
+    link_context_t *ctx=context;
+    win32_dll_t *dll=ctx->dll;
+    win32_dll_image_t *parent=&dll->images[ctx->parent];
+    int builtin=builtin_by_name(module);
+    if(builtin>=0) {
+        uint32_t proc=builtin_symbol(builtin,symbol,ordinal);
+        if(!proc){fail(dll,WIN32_DLL_ERROR_PROC_NOT_FOUND);return 0u;}
+        uint8_t mask=(uint8_t)(1u<<builtin);
+        if(!(parent->builtin_deps&mask)) {
+            if(dll->builtin_dep_refs[builtin]==65535u) {
+                fail(dll,WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY);
+                return 0u;
+            }
+            ++dll->builtin_dep_refs[builtin];
+            parent->builtin_deps|=mask;
+        }
+        return proc;
+    }
+    if(!valid_dll_basename(module)) {
+        fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
+        return 0u;
+    }
+    int child=slot_by_name(dll,module);
+    if(child>=0 && dll->images[child].state!=2u) {
+        fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT); /* dependency cycle */
+        return 0u;
+    }
+    uint32_t handle=0u;
+    if(child<0 || !(parent->image_deps&(1u<<child))) {
+        handle=load_name_mode(dll,module,true);
+        if(!handle)return 0u;
+        child=slot_by_handle(dll,handle);
+        if(child<0){fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);return 0u;}
+        parent->image_deps|=(uint8_t)(1u<<child);
+    } else handle=dll->images[child].handle;
+    const win32_dll_image_t *dep=&dll->images[child];
+    uint32_t code=win32_pe_dll_resolve(
+        dll->vm->guest+(size_t)(dep->handle-dll->vm->base),
+        &dep->info,symbol,ordinal);
+    if(!code)fail(dll,WIN32_DLL_ERROR_PROC_NOT_FOUND);
+    return code;
+}
+static uint32_t load_name_mode(win32_dll_t *dll,const char *name,bool dependency) {
+    int builtin=builtin_by_name(name);
+    if(builtin>=0) {
+        if(!dependency) {
+            if(dll->refs[builtin]==65535u)
+                return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
+            ++dll->refs[builtin];
+        }
         dll->last_error=0;
-        return id==0?WIN32_DLL_KERNEL32_HANDLE:WIN32_DLL_MSVCRT_HANDLE;
+        return builtin==0?WIN32_DLL_KERNEL32_HANDLE:WIN32_DLL_MSVCRT_HANDLE;
     }
     if(!valid_dll_basename(name) || !dll->reader || !dll->vm)
         return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
-    if(dll->image_refs) {
-        if(!equals_ci(name,dll->image_name))
-            return fail(dll,WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY);
-        if(dll->image_refs==65535u)
-            return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-        ++dll->image_refs;
+    int slot=slot_by_name(dll,name);
+    if(slot>=0) {
+        win32_dll_image_t *m=&dll->images[slot];
+        if(m->state!=2u)return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);
+        uint16_t *refs=dependency?&m->dep_refs:&m->refs;
+        if(*refs==65535u)return fail(dll,WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY);
+        ++*refs;
         dll->last_error=0;
-        return dll->image_handle;
+        return m->handle;
     }
-    int length=dll->reader(name,file_staging,sizeof(file_staging),
-                           dll->reader_context);
-    if(length<=0 || (size_t)length>sizeof(file_staging))
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+        if(!dll->images[i].state){slot=(int)i;break;}
+    if(slot<0)return fail(dll,WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY);
+    win32_dll_image_t *m=&dll->images[slot];
+    clear_module(m);
+    m->state=1u;
+    unsigned len=0u;
+    for(;name[len] && len+1u<sizeof(m->name);++len)
+        m->name[len]=name[len];
+    m->name[len]=0;
+    int size=dll->reader(name,file_staging,sizeof(file_staging),
+                         dll->reader_context);
+    if(size<=0 || (size_t)size>sizeof(file_staging)) {
+        clear_module(m);
         return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
-    uint32_t size=win32_pe_dll_image_size(file_staging,(size_t)length);
-    if(!size)return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);
-    uint32_t address=win32_vm_alloc_module(dll->vm,size);
-    if(!address)return fail(dll,WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY);
-    size_t offset=(size_t)(address-dll->vm->base);
-    uint8_t *mapped=dll->vm->guest+offset;
-    win32_pe_dll_info_t image;
-    if(!win32_pe_dll_stage(file_staging,(size_t)length,mapped,size,
-                            address,&image)) {
-        win32_vm_free_module(dll->vm,address);
+    }
+    uint32_t mapped_size=win32_pe_dll_image_size(file_staging,(size_t)size);
+    if(!mapped_size){clear_module(m);return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);}
+    uint32_t address=win32_vm_alloc_module(dll->vm,mapped_size);
+    if(!address){clear_module(m);return fail(dll,WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY);}
+    m->handle=address;
+    uint8_t *mapped=dll->vm->guest+(size_t)(address-dll->vm->base);
+    if(!win32_pe_dll_stage(file_staging,(size_t)size,mapped,mapped_size,
+                           address,&m->info)) {
+        unload_slot(dll,(unsigned)slot);
         return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);
     }
-    dll->image_info=image;
-    dll->image_handle=address;
-    dll->image_refs=1u;
-    size_t i=0;
-    for(;name[i] && i+1u<sizeof(dll->image_name);++i)
-        dll->image_name[i]=name[i];
-    dll->image_name[i]=0;
+    link_context_t ctx={dll,(unsigned)slot};
+    dll->last_error=0;
+    if(!win32_pe_dll_bind_imports(mapped,&m->info,import_symbol,&ctx)) {
+        uint32_t code=dll->last_error?dll->last_error:
+                       WIN32_DLL_ERROR_BAD_EXE_FORMAT;
+        unload_slot(dll,(unsigned)slot); /* rolls back dependency refs */
+        return fail(dll,code);
+    }
+    m->state=2u;
+    if(dependency)m->dep_refs=1u;
+    else m->refs=1u;
     dll->last_error=0u;
     return address;
 }
 uint32_t win32_dll_load(win32_dll_t *dll,uint32_t guest_name) {
     char name[65];
-    if(!dll||!read_name(dll,guest_name,name))
+    if(!dll || !read_name(dll,guest_name,name))
         return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-    return load_name(dll,name);
+    return load_name_mode(dll,name,false);
 }
 uint32_t win32_dll_load_w(win32_dll_t *dll,uint32_t guest_name) {
     char name[65];
-    if(!dll||!read_wide_name(dll,guest_name,name))
+    if(!dll || !read_wide_name(dll,guest_name,name))
         return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-    return load_name(dll,name);
+    return load_name_mode(dll,name,false);
 }
 uint32_t win32_dll_get_module(win32_dll_t *dll,uint32_t guest_name,bool wide) {
-    if(!dll)return 0;
-    if(guest_name==0u) {
-        dll->last_error=0;
-        return WIN32_PE_USER_BASE;
-    }
+    if(!dll)return 0u;
+    if(guest_name==0u){dll->last_error=0u;return WIN32_PE_USER_BASE;}
     char name[65];
     if(!(wide?read_wide_name(dll,guest_name,name):
                read_name(dll,guest_name,name)))
         return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-    int id=module_by_name(name);
-    if(id<0) {
-        if(dll->image_refs && equals_ci(name,dll->image_name)) {
-            dll->last_error=0;
-            return dll->image_handle;
-        }
-        return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
+    int builtin=builtin_by_name(name);
+    if(builtin>=0) {
+        if(!dll->pinned[builtin] && !dll->refs[builtin] &&
+           !dll->builtin_dep_refs[builtin])
+            return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
+        dll->last_error=0u;
+        return builtin==0?WIN32_DLL_KERNEL32_HANDLE:WIN32_DLL_MSVCRT_HANDLE;
     }
-    if(!dll->pinned[id] && dll->refs[id]==0u)
+    int slot=slot_by_name(dll,name);
+    if(slot<0 || dll->images[slot].state!=2u)
         return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
-    dll->last_error=0;
-    return id==0?WIN32_DLL_KERNEL32_HANDLE:WIN32_DLL_MSVCRT_HANDLE;
+    dll->last_error=0u;
+    return dll->images[slot].handle;
 }
-uint32_t win32_dll_symbol(win32_dll_t *dll,uint32_t module,
+uint32_t win32_dll_symbol(win32_dll_t *dll,uint32_t handle,
                           uint32_t guest_symbol) {
-    if(!dll)return 0;
-    if(dll->image_refs && module==dll->image_handle) {
-        const char *name=NULLPTR;
-        char symbol[65];
+    if(!dll)return 0u;
+    int slot=slot_by_handle(dll,handle);
+    if(slot>=0) {
+        char name[65];
+        const char *symbol=NULLPTR;
         if(guest_symbol>65535u) {
-            if(!read_name(dll,guest_symbol,symbol))
+            if(!read_name(dll,guest_symbol,name))
                 return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-            name=symbol;
+            symbol=name;
         }
-        uint32_t target=win32_pe_dll_resolve(
-            dll->vm->guest+(size_t)(module-dll->vm->base),
-            &dll->image_info,name,guest_symbol);
-        if(!target)return fail(dll,WIN32_DLL_ERROR_PROC_NOT_FOUND);
+        const win32_dll_image_t *m=&dll->images[slot];
+        uint32_t code=win32_pe_dll_resolve(
+            dll->vm->guest+(size_t)(handle-dll->vm->base),
+            &m->info,symbol,guest_symbol);
+        if(!code)return fail(dll,WIN32_DLL_ERROR_PROC_NOT_FOUND);
         dll->last_error=0;
-        return target;
+        return code;
     }
-    int id=module_id(module);
-    if(id<0||(!dll->refs[id]&&!dll->pinned[id]))
+    int builtin=builtin_by_handle(handle);
+    if(builtin<0 || (!dll->refs[builtin] && !dll->pinned[builtin] &&
+                      !dll->builtin_dep_refs[builtin]))
         return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
-    /* The built-in virtual modules do not support ordinal imports. */
     if(guest_symbol<=65535u)
         return fail(dll,WIN32_DLL_ERROR_PROC_NOT_FOUND);
     char name[65];
     if(!read_name(dll,guest_symbol,name))
         return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-    const export_t *list=id==0?kernel32_exports:msvcrt_exports;
-    size_t count=id==0?sizeof(kernel32_exports)/sizeof(export_t):
-                       sizeof(msvcrt_exports)/sizeof(export_t);
-    for(size_t i=0;i<count;++i) {
-        if(equals_exact(name,list[i].name)) {
-            dll->last_error=0;
-            return WIN32_PE_USER_BASE+WIN32_PE_RUNTIME_OFFSET+
-                   (uint32_t)list[i].slot*WIN32_PE_BRIDGE_SLOT;
-        }
-    }
-    return fail(dll,WIN32_DLL_ERROR_PROC_NOT_FOUND);
+    uint32_t code=builtin_symbol(builtin,name,0u);
+    if(!code)return fail(dll,WIN32_DLL_ERROR_PROC_NOT_FOUND);
+    dll->last_error=0u;
+    return code;
 }
-uint32_t win32_dll_free(win32_dll_t *dll,uint32_t module) {
-    if(!dll)return 0;
-    if(dll->image_refs && module==dll->image_handle) {
-        if(--dll->image_refs==0u) {
-            if(!win32_vm_free_module(dll->vm,dll->image_handle)) {
-                dll->image_refs=1u;
-                return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
-            }
-            dll->image_handle=0u;
-            dll->image_name[0]=0;
-            dll->image_info.image_size=0u;
-        }
-        dll->last_error=0;
+uint32_t win32_dll_free(win32_dll_t *dll,uint32_t handle) {
+    if(!dll)return 0u;
+    int slot=slot_by_handle(dll,handle);
+    if(slot>=0) {
+        win32_dll_image_t *m=&dll->images[slot];
+        if(!m->refs)return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
+        --m->refs;
+        if(!m->refs && !m->dep_refs)unload_slot(dll,(unsigned)slot);
+        dll->last_error=0u;
         return 1u;
     }
-    int id=module_id(module);
-    if(id<0||!dll->refs[id])
+    int builtin=builtin_by_handle(handle);
+    if(builtin<0 || !dll->refs[builtin])
         return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
-    dll->refs[id]--;
-    dll->last_error=0;
+    --dll->refs[builtin];
+    dll->last_error=0u;
     return 1u;
 }
