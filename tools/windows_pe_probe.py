@@ -18,6 +18,8 @@ BRIDGES = {
     "getmodulehandlea", "getmodulehandlew",
     "getcommandlinea", "getcommandlinew",
     "setlasterror", "isdebuggerpresent",
+    "virtualalloc", "virtualfree",
+    "loadlibrarya", "getprocaddress", "freelibrary",
 }
 MSVCRT_BRIDGES = {
     "strlen", "memcpy", "memset", "memcmp", "strcmp", "strncmp",
