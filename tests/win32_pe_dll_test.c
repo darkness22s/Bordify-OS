@@ -166,6 +166,19 @@ int main(int argc,char **argv) {
     assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
     assert(memcmp(duplicate_iat,memory+0x1550u,
                   sizeof(duplicate_iat))==0);
+    /* An IAT that aliases the import descriptor itself must be rejected
+     * without rewriting loader metadata, even with a valid INT. */
+    make_fixture(file);
+    set_imports(file);
+    p32(file+0x710u,0x1504u); /* FirstThunk points into descriptor */
+    p32(file+0x704u,0x15a0u); /* original thunk at aliased destination */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    uint8_t descriptor_before[40];
+    memcpy(descriptor_before,memory+0x1500u,sizeof(descriptor_before));
+    assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    assert(memcmp(descriptor_before,memory+0x1500u,
+                  sizeof(descriptor_before))==0);
     make_fixture(file);
     set_imports(file);
     p32(file+0x740u,0x80000007u);
