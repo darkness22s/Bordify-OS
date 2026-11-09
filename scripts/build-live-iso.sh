@@ -10,14 +10,19 @@ cd "$WORK"
 # Work directory is isolated from the legacy kernel image builder.
 lb config --mode debian --distribution trixie --architectures amd64 \
   --binary-images iso-hybrid --archive-areas "main contrib non-free-firmware" \
-  --debian-installer none --bootappend-live "boot=live components" \
+  --debian-installer none --security false --bootappend-live "boot=live components" \
   --iso-application "Bordify OS Linux Edition" \
   --iso-publisher "Bordify OS"
-mkdir -p config/package-lists \
+mkdir -p config/archives config/package-lists \
   config/includes.chroot/usr/local/bin \
   config/includes.chroot/usr/share/xsessions \
   config/includes.chroot/usr/share/applications \
   config/includes.chroot/etc/lightdm/lightdm.conf.d
+# Ubuntu's older live-build defaults to obsolete trixie/updates security paths.
+# Use Debian's current security suite explicitly for the live rootfs and image.
+printf '%s\n' 'deb http://security.debian.org/debian-security trixie-security main contrib non-free-firmware' \
+  > config/archives/debian-security.list.chroot
+cp config/archives/debian-security.list.chroot config/archives/debian-security.list.binary
 cp "$ROOT/linux/live/packages.list.chroot" config/package-lists/bordify.list.chroot
 install -m 755 "$ROOT/build/linux/bordify-shell" config/includes.chroot/usr/local/bin/bordify-shell
 install -m 755 "$ROOT/linux/bordify_open.py" config/includes.chroot/usr/local/bin/bordify-open
