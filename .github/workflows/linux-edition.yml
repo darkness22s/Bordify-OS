@@ -59,7 +59,19 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential libsdl2-dev python3-pil fonts-dejavu-core \
             live-build debootstrap squashfs-tools xorriso \
-            grub-pc-bin grub-efi-amd64-bin mtools
+            grub-pc-bin grub-efi-amd64-bin mtools rsync \
+            isolinux syslinux-common syslinux-utils grub-common dosfstools
+      - name: Use Debian 13's live-build rather than Ubuntu's older incompatible scripts
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://deb.debian.org/debian/pool/main/l/live-build/live-build_20250505+deb13u1_all.deb' \
+            --output /tmp/live-build-trixie.deb
+          printf '%s  %s\n' \
+            '58e09779881cbcc631c49ceb703413e0247a87db01823e597b2a1c40a2afd8f4' \
+            /tmp/live-build-trixie.deb | sha256sum -c -
+          sudo dpkg -i /tmp/live-build-trixie.deb
+          dpkg-query -W live-build
       - name: Assemble Debian Linux hybrid ISO
         run: bash scripts/build-live-iso.sh
       - name: Verify hybrid ISO was produced
