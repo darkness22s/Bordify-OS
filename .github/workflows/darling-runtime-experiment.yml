@@ -1,0 +1,49 @@
+name: Experimental Darling runtime acceptance (separate from Linux release)
+on:
+  push:
+    branches: [test/darling-runtime-acceptance-2026-11-09]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  darling-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official Darling Linux binary release
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unzip ca-certificates
+          mkdir -p build/darling/release
+          cd build/darling
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://github.com/darlinghq/darling/releases/download/v0.1.20260608/debs_20260608.zip' \
+            -o darling-official-debs.zip
+          sha256sum darling-official-debs.zip
+          unzip -l darling-official-debs.zip | tail -n 90
+          unzip -q darling-official-debs.zip -d release
+          find release -type f -name '*.deb' -print | sort
+      - name: Install official Darling packages for a native Linux runtime test
+        run: |
+          set -euxo pipefail
+          test "$(find build/darling/release -type f -name '*.deb' | wc -l)" -gt 0
+          find build/darling/release -type f -name '*.deb' -print0 |
+            xargs -0 -r sudo apt-get install -y --no-install-recommends
+          command -v darling
+      - name: Execute real Darwin programs through Darling (not a parser fixture)
+        run: |
+          set -euo pipefail
+          timeout 120s darling shell 'uname -s' | tee build/darling/darling-uname.log
+          grep -F 'Darwin' build/darling/darling-uname.log
+          timeout 120s darling shell '/usr/bin/true'
+          echo 'Darling actual Darwin binaries: PASS'
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: darling-runtime-evidence
+          path: |
+            build/darling/*.log
+          if-no-files-found: warn
+          retention-days: 7
