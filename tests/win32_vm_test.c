@@ -14,7 +14,7 @@ int main(void) {
     guest[a-BASE]=0xa5;
     uint32_t b=win32_vm_alloc(&vm,0,8193u,0x3000u,0x04u);
     assert(b==a+4096u && vm.used_pages==0x0fu);
-    assert(!win32_vm_free(&vm,a+4096u,0,0x8000u));
+    assert(!win32_vm_free(&vm,b+4096u,0,0x8000u));
     assert(vm.last_error==87u);
     assert(!win32_vm_alloc(&vm,0,4096,0x3000u,0x40u));
     assert(vm.last_error==87u); /* reject executable allocation */
