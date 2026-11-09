@@ -154,6 +154,28 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
        chain_written!=(DWORD)sizeof(chain_message)-1u)
         ExitProcess(93u);
 
+    /* A genuine compiled PE32 DLL with a nonzero entrypoint must attach
+     * on the *calling* guest thread before LoadLibrary returns. */
+    HMODULE init=LoadLibraryA("INIT.DLL");
+    if(!init)ExitProcess(94u);
+    FARPROC state_proc=GetProcAddress(init,"BordifyInitState");
+    if(!state_proc)ExitProcess(95u);
+    DWORD (WINAPI *init_state)(DWORD)=(DWORD (WINAPI *)(DWORD))state_proc;
+    if(init_state(7u)!=0x4bu)ExitProcess(96u);
+    HMODULE again_init=LoadLibraryW(L"init.dll");
+    if(again_init!=init || !FreeLibrary(again_init))ExitProcess(97u);
+    if(init_state(7u)!=0x4bu)ExitProcess(98u);
+    if(!FreeLibrary(init) || GetModuleHandleA("init.dll"))ExitProcess(99u);
+    if(GetLastError()!=ERROR_MOD_NOT_FOUND)ExitProcess(100u);
+    HMODULE bad=LoadLibraryA("BFAIL.DLL");
+    if(bad || GetLastError()!=ERROR_DLL_INIT_FAILED)ExitProcess(101u);
+    static const char dynamic_message[]=
+        "BORDIFY DYNAMIC DLL: process attach, detach, failure rollback passed\r\n";
+    DWORD dynamic_written=0;
+    if(!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),dynamic_message,
+                  (DWORD)sizeof(dynamic_message)-1u,&dynamic_written,0) ||
+       dynamic_written!=(DWORD)sizeof(dynamic_message)-1u)ExitProcess(102u);
+
     HANDLE output=GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD written=0;
     DWORD length=(DWORD)(sizeof(message)-1u);

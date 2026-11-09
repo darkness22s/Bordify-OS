@@ -58,6 +58,12 @@ $(BUILD)/apps/init.dll: apps/win32_initdll.c
 	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
 	  -Wl,--out-implib,$(BUILD)/apps/libinit.a -o $@ $<
 
+$(BUILD)/apps/bfail.dll: apps/win32_faildll.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,_DllMain@12 -Wl,--image-base,0x13000000 \
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias -o $@ $<
+
 $(BUILD)/apps/winstat.exe: apps/win32_static_realc.c $(BUILD)/apps/chain.dll $(BUILD)/apps/init.dll
 	@mkdir -p $(BUILD)/apps
 	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib \
