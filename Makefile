@@ -1,6 +1,7 @@
 CC ?= gcc
 PYTHON ?= python3
 CLANG ?= clang
+MINGW_CC ?= i686-w64-mingw32-gcc
 
 CFLAGS := -m32 -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
           -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-builtin \
@@ -30,6 +31,15 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
 all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/winio.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch $(BUILD)/apps/mount.dmg $(BUILD)/apps/armwork.mch $(BUILD)/apps/armcalc.mch $(BUILD)/apps/cocoa.mch
+
+# A genuinely C-compiled Windows PE32 program with normal kernel32 DLL
+# imports and a preferred image base that requires PE32 HIGHLOW rebasing.
+$(BUILD)/apps/winreal.exe: apps/win32_realc.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-stack-protector -nostdlib \
+	  -Wl,--entry,_mainCRTStartup -Wl,--subsystem,console \
+	  -Wl,--image-base,0x00400000 -Wl,--enable-reloc-section \
+	  -o $@ $< -lkernel32
 
 $(BUILD)/apps/win64setup.exe: tools/genwin64setup.py $(BUILD)/apps/win64demo.exe
 	@mkdir -p $(BUILD)/apps
