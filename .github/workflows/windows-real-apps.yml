@@ -31,6 +31,10 @@ jobs:
           make build/apps/winreal.exe build/apps/wincrt.exe build/apps/bordll.dll
           # Verify the actual independently built PE32 DLL image on the host,
           # before attempting native exported code inside the QEMU guest.
+          echo '[pe-dll] compiler-produced DLL image metadata:'
+          i686-w64-mingw32-objdump -p build/apps/bordll.dll | sed -n '1,115p'
+          echo '[pe-dll] PE section metadata:'
+          i686-w64-mingw32-objdump -h build/apps/bordll.dll
           ./build/tests/win32_pe_dll_test build/apps/bordll.dll
           sudo bash scripts/build-image.sh
       - name: Download genuine Google Chrome installers and 7-Zip utility
