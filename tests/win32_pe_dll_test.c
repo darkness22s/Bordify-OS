@@ -164,6 +164,10 @@ int main(int argc,char **argv) {
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
     make_fixture(file);
+    p32(file+0x178u+20u,0x100u); /* raw bytes alias PE headers */
+    assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                               0x40180000u,&info));
+    make_fixture(file);
     p32(file+0x178u+16u,0x1000u); /* section overflows file */
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
