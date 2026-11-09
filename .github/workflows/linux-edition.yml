@@ -1,0 +1,81 @@
+name: Linux Bordify edition (desktop, Wine and boot image)
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/linux-bordify-desktop-compat-2026-11-09
+
+permissions:
+  contents: read
+
+jobs:
+  linux-desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux renderer and Windows test toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libsdl2-dev python3-pil fonts-dejavu-core \
+            gcc-mingw-w64-x86-64 wine wine64 xvfb xauth
+      - name: Unit-test Windows/macOS/native app dispatch
+        run: python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
+      - name: Compile preserved Bordify desktop and verify frame pixels
+        run: make -C linux test
+      - name: Compile independently authored Windows PE64 using MinGW
+        run: |
+          mkdir -p build/linux
+          x86_64-w64-mingw32-gcc -O2 linux/tests/wine_hello.c \
+            -o build/linux/wine-hello.exe
+          file build/linux/wine-hello.exe
+      - name: Execute real Windows PE64 under Wine
+        run: |
+          set -euo pipefail
+          timeout 180s xvfb-run -a env WINEDEBUG=-all \
+            WINEPREFIX="$RUNNER_TEMP/bordify-wine" \
+            wine build/linux/wine-hello.exe > build/linux/wine.log 2>&1
+          cat build/linux/wine.log
+          grep -F 'BORDIFY_LINUX_WINE_PE64_OK' build/linux/wine.log
+      - name: Upload Linux desktop verification screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-Linux-desktop-test
+          path: build/linux/desktop.bmp
+          retention-days: 7
+
+  linux-live-iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    needs: linux-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian live-image builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libsdl2-dev python3-pil fonts-dejavu-core \
+            live-build debootstrap squashfs-tools xorriso \
+            grub-pc-bin grub-efi-amd64-bin mtools
+      - name: Assemble Debian Linux hybrid ISO
+        run: bash scripts/build-live-iso.sh
+      - name: Verify hybrid ISO was produced
+        run: |
+          set -euo pipefail
+          test -s dist/Bordify-OS-Linux-amd64.iso
+          file dist/Bordify-OS-Linux-amd64.iso
+          sha256sum -c dist/Bordify-OS-Linux-amd64.iso.sha256
+          xorriso -indev dist/Bordify-OS-Linux-amd64.iso \
+            -find /live -type f -print
+      - name: Upload bootable Linux image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-OS-Linux-amd64
+          path: |
+            dist/Bordify-OS-Linux-amd64.iso
+            dist/Bordify-OS-Linux-amd64.iso.sha256
+          if-no-files-found: error
+          retention-days: 14
