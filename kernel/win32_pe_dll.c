@@ -136,7 +136,8 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
         uint32_t raw=rd32(s+16u),offset=rd32(s+20u);
         if(raw>n)n=raw;
         if(!n || v<headers || !fits(size,v,n) ||
-           !fits(file_size,offset,raw))return false;
+           !fits(file_size,offset,raw) ||
+           (raw && offset<headers))return false; /* raw sections cannot alias PE headers */
         for(uint32_t j=0;j<i;++j) {
             const uint8_t *other=file+section_table+j*40u;
             uint32_t b=rd32(other+12u),bn=rd32(other+8u);
