@@ -76,7 +76,7 @@ int main(int argc,char **argv) {
     assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                               0x40180000u,&info));
     assert(info.entry_rva==0x1200u);
-    p32(file+0x98u+16u,0x1100u); /* non-executable exported data */
+    p32(file+0x98u+16u,0x1800u); /* RVA outside executable section */
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
     make_fixture(file);
