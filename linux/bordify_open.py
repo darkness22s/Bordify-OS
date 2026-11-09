@@ -10,7 +10,6 @@ import argparse
 import os
 from pathlib import Path
 import plistlib
-import shlex
 import shutil
 import struct
 import subprocess
@@ -71,7 +70,7 @@ def plan_launch(path: Path, *, available=shutil.which) -> tuple[list[str], dict[
         if not available("darling"):
             raise LaunchError("Darling is required for experimental macOS PKG installation")
         inside = "/Volumes/SystemRoot" + str(path)
-        return ["darling", "shell", "installer -pkg " + shlex.quote(inside) + " -target /"], {}
+        return ["darling", "shell", "installer", "-pkg", inside, "-target", "/"], {}
     if path.is_dir() and path.suffix.lower() == ".app":
         path = resolve_macos_bundle(path)
     elif path.is_dir():
@@ -98,14 +97,14 @@ def plan_launch(path: Path, *, available=shutil.which) -> tuple[list[str], dict[
         if not available("darling"):
             raise LaunchError("A DMG is an installer image, not an app. Install Darling to try mounting it.")
         inside = "/Volumes/SystemRoot" + str(path)
-        return ["darling", "shell", "hdiutil attach " + shlex.quote(inside)], {}
+        return ["darling", "shell", "hdiutil", "attach", inside], {}
     if magic[:4] in MACHO_MAGIC:
         if not available("darling"):
             raise LaunchError("Darling is not installed. macOS application support is experimental.")
-        # Darling translates host paths under /Volumes/SystemRoot. The darling
-        # shell accepts a sh -c string; quote ALL user-controlled path content.
+        # Darling shell accepts a program and distinct argv elements; it does
+        # NOT accept one shell command string. Never use host-shell expansion.
         inside = "/Volumes/SystemRoot" + str(path)
-        return ["darling", "shell", "exec " + shlex.quote(inside)], {}
+        return ["darling", "shell", inside], {}
     if magic[:4] == b"\x7fELF" and os.access(path, os.X_OK):
         return [str(path)], {}
     if not available("xdg-open"):

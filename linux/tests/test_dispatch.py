@@ -50,8 +50,7 @@ class DispatchTests(unittest.TestCase):
         path = self.make_file("my ' app.macho", b"\xcf\xfa\xed\xfe" + bytes(8))
         cmd, _ = launcher.plan_launch(path, available=self.available)
         self.assertEqual(cmd[0:2], ["darling", "shell"])
-        self.assertIn("'/Volumes/SystemRoot", cmd[2])
-        self.assertIn("exec ", cmd[2])
+        self.assertEqual(cmd, ["darling", "shell", "/Volumes/SystemRoot" + str(path)])
 
     def test_bundle_validates_plist(self):
         app = self.base / "Example.app"
@@ -77,8 +76,8 @@ class DispatchTests(unittest.TestCase):
         path = self.make_file("Installer.pkg", b"xar!" + bytes(16))
         cmd, env = launcher.plan_launch(path, available=self.available)
         self.assertEqual(cmd[0:2], ["darling", "shell"])
-        self.assertIn("installer -pkg ", cmd[2])
-        self.assertIn(" -target /", cmd[2])
+        self.assertEqual(cmd, ["darling", "shell", "installer", "-pkg",
+                               "/Volumes/SystemRoot" + str(path), "-target", "/"])
         self.assertEqual(env, {})
 
     def test_bad_pkg_rejected(self):
@@ -89,7 +88,14 @@ class DispatchTests(unittest.TestCase):
     def test_dmg_is_mount_not_execute(self):
         path = self.make_file("Installer.dmg", b"sample image")
         cmd, _ = launcher.plan_launch(path, available=self.available)
-        self.assertIn("hdiutil attach", cmd[2])
+        self.assertEqual(cmd, ["darling", "shell", "hdiutil", "attach",
+                               "/Volumes/SystemRoot" + str(path)])
+
+    def test_macho_metacharacters_are_single_argument(self):
+        path = self.make_file("a $(echo BAD); test.macho", b"\xcf\xfa\xed\xfe" + bytes(8))
+        cmd, env = launcher.plan_launch(path, available=self.available)
+        self.assertEqual(cmd, ["darling", "shell", "/Volumes/SystemRoot" + str(path)])
+        self.assertEqual(env, {})
 
     def test_elf_native(self):
         path = self.make_file("local", b"\x7fELF" + bytes(32))
