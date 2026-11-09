@@ -111,6 +111,19 @@ void kernel_main(uint32_t mb_info_address) {
             kprintf("[win32-file] persistent Win32 file API demo failed: %d\n",winio);
     }
 
+#ifdef BORDIFY_CHROME_PROBE
+    /* Repeated native guest create/write/read/close cycles detect FAT16
+     * directory or free-chain regressions with large third-party programs
+     * already occupying the filesystem. Never run this on release boots. */
+    if (fat16_mounted()) {
+        for (unsigned n=0;n<3u;++n) {
+            int rc=process_run_win32_pe("APPS","WINIO.EXE");
+            kprintf("[win32-stress] repeat=%u Win32 file roundtrip exit=%d\n",
+                    n+1u,rc);
+        }
+    }
+#endif
+
     compat_vm_demos();
 
 #ifdef BORDIFY_CHROME_PROBE
