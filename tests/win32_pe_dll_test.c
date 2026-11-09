@@ -70,6 +70,16 @@ int main(int argc,char **argv) {
     assert(info.guest_base==0x40180000u);
     assert(win32_pe_dll_resolve(memory,&info,"BordifyAdd",0u)==0x40181200u);
     assert(win32_pe_dll_resolve(memory,&info,NULL,1u)==0x40181200u);
+    assert(info.entry_rva==0u);
+    make_fixture(file);
+    p32(file+0x98u+16u,0x1200u); /* valid executable DllMain RVA */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    assert(info.entry_rva==0x1200u);
+    p32(file+0x98u+16u,0x1100u); /* non-executable exported data */
+    assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                               0x40180000u,&info));
+    make_fixture(file);
     assert(!win32_pe_dll_resolve(memory,&info,"NoSuchExport",0u));
     assert(!win32_pe_dll_resolve(memory,&info,NULL,2u));
     assert(memory[0x1204u]==0x34u && memory[0x1207u]==0x40u);

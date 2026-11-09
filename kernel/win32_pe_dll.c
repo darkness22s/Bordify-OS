@@ -101,7 +101,8 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
                         uint32_t base,win32_pe_dll_info_t *out) {
     if(out){out->image_size=0;out->guest_base=0;
             out->export_rva=0;out->export_size=0;
-            out->import_rva=0;out->import_size=0;}
+            out->import_rva=0;out->import_size=0;
+            out->entry_rva=0;}
     size_t nt,opt;uint16_t count;
     if(!out || !dst || (base&4095u) ||
        !header(file,file_size,&nt,&opt,&count))return false;
@@ -174,6 +175,11 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
     out->export_size=exp_size;
     out->import_rva=imports;
     out->import_size=imports_size;
+    out->entry_rva=rd32(file+opt+16u);
+    if(out->entry_rva && !executable_rva(dst,size,out->entry_rva)) {
+        out->entry_rva=0u;out->image_size=0u;
+        return false;
+    }
     return true;
 }
 /* Read PE ASCII names with a strict bound. Even imported names are copied
