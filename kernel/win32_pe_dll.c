@@ -145,6 +145,12 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
             uint32_t br=rd32(other+16u);
             if(br>bn)bn=br;
             if(v<b+bn && b<v+n)return false;
+            /* Two distinct sections must not share file-backed bytes.
+             * Overlapping raw ranges make the image ambiguous and can
+             * hide code/data behind a second section mapping. */
+            uint32_t bo=rd32(other+20u);
+            if(raw && br && (uint64_t)offset<(uint64_t)bo+br &&
+               (uint64_t)bo<(uint64_t)offset+raw)return false;
         }
     }
     for(size_t i=0;i<capacity;++i)dst[i]=0;
