@@ -108,7 +108,9 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
        !header(file,file_size,&nt,&opt,&count))return false;
     uint32_t size=rd32(file+opt+56u),headers=rd32(file+opt+60u);
     size_t section_table=opt+rd16(file+nt+20u);
-    if(size<4096u || size>WIN32_PE_DLL_MAX_BYTES || size>capacity ||
+    /* The mapped image must not wrap the 32-bit guest address space. */
+    if((uint64_t)base+(uint64_t)size>0x100000000ULL ||
+       size<4096u || size>WIN32_PE_DLL_MAX_BYTES || size>capacity ||
        headers<section_table+count*40u ||
        !fits(file_size,0u,headers) || headers>size)return false;
     uint32_t exp=rd32(file+opt+96u),exp_size=rd32(file+opt+100u);
