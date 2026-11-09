@@ -202,6 +202,7 @@ void chrome_trial_run(void) {
     inspect_existing_demo(apps.cluster,"SETUP64.EXE");
     try_windows(apps.cluster);
     try_other_windows(apps.cluster,"WEBSET.EXE","Chrome web installer");
+    try_other_windows(apps.cluster,"WINREAL.EXE","independent MinGW PE32 program");
     try_other_windows(apps.cluster,"SEVEN.EXE","7-Zip standalone utility");
     try_other_windows(apps.cluster,"CHRMAPP.EXE","extracted Chrome application");
     try_macos(apps.cluster);
