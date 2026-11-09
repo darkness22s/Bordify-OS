@@ -10,6 +10,9 @@
 #include "string.h"
 #include "apps.h"
 #include "config.h"
+#ifdef BORDIFY_LINUX
+extern void linux_idle(void);
+#endif
 
 typedef struct {
     const gui_app_t *app;
@@ -109,7 +112,11 @@ void desktop_run(void) {
     draw_desktop();
 
     for (;;) {
+#ifdef BORDIFY_LINUX
+        linux_idle();
+#else
         cpu_halt();
+#endif
         mouse_state_t mouse;
         input_mouse_state(&mouse);
         bool dirty = mouse.x != previous.x || mouse.y != previous.y ||

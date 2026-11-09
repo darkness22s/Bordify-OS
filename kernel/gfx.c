@@ -14,7 +14,7 @@ static inline bool in_clip(int x, int y) {
     return x >= clip.x0 && x < clip.x1 && y >= clip.y0 && y < clip.y1;
 }
 
-void gfx_init(uint32_t framebuffer_address, uint32_t pitch, int width, int height) {
+void gfx_init(uintptr_t framebuffer_address, uint32_t pitch, int width, int height) {
     framebuffer = (uint8_t *)(uintptr_t)framebuffer_address;
     framebuffer_pitch = pitch;
     screen_width = width;
