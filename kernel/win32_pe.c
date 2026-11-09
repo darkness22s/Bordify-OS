@@ -450,7 +450,8 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         get_module_handle,get_module_handle,
         get_command_line,get_command_line,set_last_error,false_value,
         crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
-        crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge
+        crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
+        virtual_alloc,virtual_free
     };
     static const size_t lengths[WIN32_PE_BRIDGE_COUNT]={
         sizeof(exit_process),sizeof(get_std_handle),
@@ -463,7 +464,8 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
         sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
         sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
-        sizeof(crt_bridge),sizeof(crt_bridge)
+        sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(virtual_alloc),sizeof(virtual_free)
     };
     if (!fits(size,WIN32_PE_CMDLINE_W_OFFSET,WIN32_PE_CMDLINE_LIMIT*2u))
         return false;
@@ -472,7 +474,7 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         uint8_t *dest=memory+WIN32_PE_RUNTIME_OFFSET+i*BRIDGE_SLOT;
         clear_bytes(dest,BRIDGE_SLOT);
         copy_bytes(dest,code[i],lengths[i]);
-        if(i>=16u) dest[14u]=(uint8_t)(10u+i-16u);
+        if(i>=16u && i<27u) dest[14u]=(uint8_t)(10u+i-16u);
     }
     uint8_t *stubs=memory+WIN32_PE_RUNTIME_OFFSET;
     wr32(stubs+10u*BRIDGE_SLOT+10u,WIN32_PE_USER_BASE);
