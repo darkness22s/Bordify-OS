@@ -107,7 +107,8 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
             out->import_rva=0;out->import_size=0;
             out->entry_rva=0;}
     size_t nt,opt;uint16_t count;
-    if(!out || !dst || (base&4095u) ||
+    if(!out || !dst || file_size>WIN32_PE_DLL_MAX_BYTES ||
+       (base&4095u) ||
        !header(file,file_size,&nt,&opt,&count))return false;
     uint32_t size=rd32(file+opt+56u),headers=rd32(file+opt+60u);
     size_t section_table=opt+rd16(file+nt+20u);
