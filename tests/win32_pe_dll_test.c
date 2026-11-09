@@ -65,6 +65,15 @@ int main(int argc,char **argv) {
     win32_pe_dll_info_t info;
     make_fixture(file);
     assert(win32_pe_dll_image_size(file,sizeof(file))==0x2000u);
+    /* The staging API must enforce the same file cap as the size probe,
+     * even when an oversized buffer starts with an otherwise valid DLL. */
+    uint8_t *oversized=calloc(WIN32_PE_DLL_MAX_BYTES+1u,1u);
+    assert(oversized);
+    memcpy(oversized,file,sizeof(file));
+    assert(!win32_pe_dll_image_size(oversized,WIN32_PE_DLL_MAX_BYTES+1u));
+    assert(!win32_pe_dll_stage(oversized,WIN32_PE_DLL_MAX_BYTES+1u,
+                               memory,sizeof(memory),0x40180000u,&info));
+    free(oversized);
     assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                               0x40180000u,&info));
     assert(info.guest_base==0x40180000u);
