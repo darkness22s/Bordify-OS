@@ -98,7 +98,7 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
     if(!rt || !rt->memory) return UINT32_MAX;
     uint8_t *dst;
     const uint8_t *src;
-    uint32_t len1,len2;
+    uint32_t len1;
 
     switch(service) {
       case 10: /* strlen(const char *) */
