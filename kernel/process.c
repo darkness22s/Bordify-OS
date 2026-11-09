@@ -8,6 +8,7 @@
 #include "win32_pe.h"
 #include "win32_files.h"
 #include "win32_crt.h"
+#include "win32_vm.h"
 #include "pit.h"
 
 #define PAGE_PRESENT 0x001u
@@ -52,6 +53,7 @@ static int exit_status;
 static bool active_win32;
 static win32_files_t win32_files;
 static win32_crt_t win32_crt;
+static win32_vm_t win32_vm;
 /* The Windows guest never supplies an arbitrary FAT16 destination. */
 static int win32_load_file(uint8_t *out,size_t capacity,void *context) {
     (void)context;
@@ -303,6 +305,8 @@ int process_run_win32_pe(const char *directory, const char *filename) {
     win32_files_reset(&win32_files);
     win32_crt_init(&win32_crt,(uint8_t *)(uintptr_t)PROCESS_USER_BASE,
                    PROCESS_USER_BASE,PROCESS_USER_BYTES);
+    win32_vm_init(&win32_vm,(uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+                  PROCESS_USER_BASE,PROCESS_USER_BYTES);
     active_win32=true;
     running = true;
     exit_status = -1;
@@ -394,6 +398,30 @@ void process_handle_interrupt(uint32_t *frame) {
                                    frame[4],frame[6],frame[5]) :
                     UINT32_MAX;
                 return;
+            case 21: { /* Win32 VirtualAlloc: 4 stdcall arguments on user stack */
+                uint32_t args=frame[4];
+                if(!active_win32 || !user_range(args,16u)) {
+                    frame[7]=0u;
+                    if(active_win32) win32_files.last_error=87u;
+                    return;
+                }
+                const uint32_t *p=(const uint32_t *)(uintptr_t)args;
+                frame[7]=win32_vm_alloc(&win32_vm,p[0],p[1],p[2],p[3]);
+                win32_files.last_error=win32_vm.last_error;
+                return;
+            }
+            case 22: { /* Win32 VirtualFree: 3 stdcall arguments */
+                uint32_t args=frame[4];
+                if(!active_win32 || !user_range(args,12u)) {
+                    frame[7]=0u;
+                    if(active_win32) win32_files.last_error=87u;
+                    return;
+                }
+                const uint32_t *p=(const uint32_t *)(uintptr_t)args;
+                frame[7]=win32_vm_free(&win32_vm,p[0],p[1],p[2]);
+                win32_files.last_error=win32_vm.last_error;
+                return;
+            }
             case 2: /* exit: EBX = signed status */
                 exit_status = (int)frame[4];
                 running = false;
