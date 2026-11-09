@@ -60,7 +60,7 @@ jobs:
             build-essential libsdl2-dev python3-pil fonts-dejavu-core \
             live-build debootstrap squashfs-tools xorriso \
             grub-pc-bin grub-efi-amd64-bin mtools rsync \
-            isolinux syslinux-common syslinux-utils grub-common dosfstools
+            isolinux syslinux-common syslinux-utils grub-common dosfstools qemu-system-x86
       - name: Use Debian 13's live-build rather than Ubuntu's older incompatible scripts
         run: |
           set -euo pipefail
@@ -91,6 +91,19 @@ jobs:
           sha256sum -c dist/Bordify-OS-Linux-amd64.iso.sha256
           xorriso -indev dist/Bordify-OS-Linux-amd64.iso \
             -find /live -type f -print
+      - name: Boot the ISO in QEMU and verify the real desktop plus app windows
+        run: |
+          python3 linux/tests/boot_iso.py dist/Bordify-OS-Linux-amd64.iso
+      - name: Upload QEMU boot evidence (including on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-Linux-boot-evidence
+          path: |
+            build/linux/qemu-*.ppm
+            build/linux/qemu-*.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload bootable Linux image
         uses: actions/upload-artifact@v4
         with:
