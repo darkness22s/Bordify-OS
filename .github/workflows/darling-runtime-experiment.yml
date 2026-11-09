@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: darling-host-test
+  cancel-in-progress: true
 jobs:
   darling-runtime:
     runs-on: ubuntu-24.04
@@ -37,10 +40,7 @@ jobs:
           # Ubuntu 24.04 AppArmor can block unprivileged user namespaces.
           # A fresh isolated CI runner is safe to configure for this test.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          timeout --kill-after=5s 60s darling shell 'uname -s' 2>&1 \
-            | tee build/darling/darling-uname.log
-          grep -F 'Darwin' build/darling/darling-uname.log
-          timeout --kill-after=5s 60s darling shell '/usr/bin/true'
+          python3 linux/tests/check_darling_host.py
           echo 'Darling actual Darwin binaries: PASS'
       - name: Upload runtime evidence
         if: always()
