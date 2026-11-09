@@ -37,6 +37,12 @@ user-mode NAT address range. HTTP and HTTPS (TLS 1.2) are supported.
 `SYSTEM/SETTINGS.CFG`. It also shows kernel, memory, display, disk, clock
 and uptime information, plus Restart and Power off controls.
 
+## Windows runtime progress — draft PR #2
+
+The experimental Windows compatibility branch now runs **independently MinGW-compiled PE32 console programs** in protected ring-3 memory. It supports a bounded `msvcrt.dll` heap/string subset, a 128 KiB `VirtualAlloc`/`VirtualFree` arena, and **virtual built-in DLL** export discovery with `LoadLibraryA`, `GetProcAddress` and `FreeLibrary` for `kernel32.dll` and `msvcrt.dll`. The compiler-built test calls these APIs, and GitHub Actions validates two boots and FAT16 persistence.
+
+**This is not general DLL loading**: neither downloaded Windows DLL images nor their dependencies or initializers are loaded. Full C runtime startup, USER32/GDI32 GUI, threading, Windows exceptions and native x64 support remain unimplemented. Real Chrome and 7-Zip still do not run. See [the precise capability matrix](docs/application-compatibility.md) and [draft PR #2](https://github.com/darkness22s/Bordify-OS/pull/2).
+
 ## Experimental cross-platform compatibility (development branch only)
 
 The draft compatibility branch includes a real isolated ELF32 demo
