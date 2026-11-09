@@ -153,6 +153,19 @@ int main(int argc,char **argv) {
     memcpy(old_iat,memory+0x1550u,sizeof(old_iat));
     assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
     assert(memcmp(old_iat,memory+0x1550u,sizeof(old_iat))==0);
+    /* Repeated import descriptors targeting the same IAT slot must fail
+     * without modifying the original thunk, even if both resolve. */
+    make_fixture(file);
+    set_imports(file);
+    p32(file+0x98u+108u,60u); /* two descriptors and terminator */
+    memcpy(file+0x714u,file+0x700u,20u);
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    uint8_t duplicate_iat[4];
+    memcpy(duplicate_iat,memory+0x1550u,sizeof(duplicate_iat));
+    assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    assert(memcmp(duplicate_iat,memory+0x1550u,
+                  sizeof(duplicate_iat))==0);
     make_fixture(file);
     set_imports(file);
     p32(file+0x740u,0x80000007u);
