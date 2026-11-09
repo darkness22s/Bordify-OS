@@ -167,6 +167,10 @@ $(BUILD)/tests/win32_pe_test: tests/win32_pe_test.c kernel/win32_pe.c kernel/win
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_pe_test.c kernel/win32_pe.c -o $@
 
+$(BUILD)/tests/win32_dll_test: tests/win32_dll_test.c kernel/win32_dll.c kernel/win32_dll.h kernel/win32_pe.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_dll_test.c kernel/win32_dll.c -o $@
+
 $(BUILD)/tests/win32_vm_test: tests/win32_vm_test.c kernel/win32_vm.c kernel/win32_vm.h
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_vm_test.c kernel/win32_vm.c -o $@
@@ -223,9 +227,10 @@ $(BUILD)/tests/hfsplus_read_test: tests/hfsplus_read_test.c kernel/hfsplus_read.
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/hfsplus_read_test.c kernel/hfsplus_read.c kernel/hfsplus_probe.c kernel/udif_blkx.c kernel/zlib_inflate.c kernel/package_inspect.c -lz -o $@
 
-test: $(BUILD)/tests/cocoa_lifecycle_test $(BUILD)/tests/win32_vm_test $(BUILD)/tests/win32_crt_test $(BUILD)/tests/win32_files_test $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+test: $(BUILD)/tests/cocoa_lifecycle_test $(BUILD)/tests/win32_dll_test $(BUILD)/tests/win32_vm_test $(BUILD)/tests/win32_crt_test $(BUILD)/tests/win32_files_test $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
 	./$(BUILD)/tests/cocoa_lifecycle_test
 	$(PYTHON) tests/linkcocoaobj_test.py
+	./$(BUILD)/tests/win32_dll_test
 	./$(BUILD)/tests/win32_vm_test
 	./$(BUILD)/tests/win32_crt_test
 	./$(BUILD)/tests/win32_files_test
