@@ -90,6 +90,17 @@ class DispatchTests(unittest.TestCase):
         cmd, _ = launcher.plan_launch(path, available=self.available)
         self.assertEqual(cmd, ["xdg-open", str(path)])
 
+    def test_launch_prepares_wine_prefix_parent(self):
+        path = self.make_file("example.exe", b"MZ" + bytes(64))
+        prefix = self.base / "new" / "prefix" / "wineprefix"
+        with mock.patch.object(launcher, "plan_launch", return_value=(
+                ["wine", str(path)], {"WINEPREFIX": str(prefix)})), \
+             mock.patch.object(launcher.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            self.assertEqual(launcher.open_file(path), 0)
+            self.assertTrue(prefix.parent.is_dir())
+            self.assertEqual(run.call_args.kwargs["env"]["WINEPREFIX"], str(prefix))
+
     def test_no_shell_execution_of_metacharacters(self):
         path = self.make_file("a; touch EXPLOIT.exe", b"MZ" + bytes(40))
         cmd, _ = launcher.plan_launch(path, available=self.available)

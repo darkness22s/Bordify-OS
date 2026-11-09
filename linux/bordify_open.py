@@ -116,6 +116,14 @@ def open_file(path: Path) -> int:
         return 2
     env = os.environ.copy()
     env.update(overrides)
+    # Wine does not reliably create the parents of a custom WINEPREFIX.
+    # Keep each Bordify Wine installation in its dedicated per-user prefix.
+    if "WINEPREFIX" in overrides:
+        try:
+            Path(overrides["WINEPREFIX"]).parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print("Bordify: cannot create Wine prefix directory: " + str(exc), file=sys.stderr)
+            return 2
     try:
         return subprocess.run(command, env=env, check=False).returncode
     except OSError as exc:
