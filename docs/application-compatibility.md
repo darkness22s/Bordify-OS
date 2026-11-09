@@ -2,6 +2,21 @@
 
 Status: **five audited experimental CI milestones pass:** native Win32 PE32 file-I/O runtime; restricted PE32+ x64 installer; zlib-compressed HFS+ DMG extraction/installation; Clang-generated Apple ARM64 execution; and statically linked Objective-C ABI plus modeled Cocoa lifecycle. **General third-party Windows/macOS apps and actual Cocoa GUI frameworks are not supported.** A generated HFS+ DMG can deliver an ARM64 Mach-O program which Bordify launches and persists to disk. **Arbitrary third-party DMGs, APFS, PKG/.app installation, general macOS compatibility and full Darwin/Cocoa are NOT supported.**
 
+## November 2026 Windows runtime development update (draft PR #2)
+
+The development branch now contains **independently tested, but bounded** Windows x86 compatibility work:
+
+- **PE32 image loading:** checked x86 PE sections, HIGHLOW relocations, compiler-style import tables and diagnosed failure reasons; a 2 MiB ring-3 guest address space is still the hard limit.
+- **MSVCRT subset:** eleven compiler-callable `msvcrt.dll` memory/string/heap imports, including `malloc/free/calloc/realloc`, tested by a separate C-compiled PE32 with two ordinary import descriptor tables. These are built-in trampolines, not an actual Microsoft CRT DLL.
+- **Win32 guest virtual memory:** restricted `VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE)` and `VirtualFree(base, 0, MEM_RELEASE)` in a single 128 KiB isolated, 4 KiB-aligned arena. The arena rejects executable memory, arbitrary addresses, separate commit/reserve, decommit, `VirtualProtect`, mapping files and NT virtual-memory semantics; released pages are cleared.
+- **Built-in DLL discovery:** `LoadLibraryA`, `GetProcAddress`, and `FreeLibrary` for **virtual** `kernel32.dll` and `msvcrt.dll` exports. Module reference counts, names, guest pointers and unsupported exports are validated. No external DLL is loaded, no image is relocated or linked dynamically, and no `DllMain`/TLS is run. Arbitrary third-party DLLs are rejected.
+- **Compiler-built guest tests:** `apps/win32_realc.c` runs a genuine MinGW-generated Windows PE32 process in QEMU, dynamically calls API symbols obtained through `GetProcAddress`, checks page allocation/release and invalid-handle behavior, prints through `WriteFile`, and exits zero. Separate host tests cover the memory arena and virtual DLL export handling.
+- **Storage regression:** the real downloaded Chrome installer and independent 7-Zip utility can be stored in a FAT16 guest disk; two QEMU boots of the **same** Windows-only disk independently validate persistent `WIN32.TXT` and the compiler-built Windows samples. Mixed Windows+macOS download tests remain experimental; they exercise the ATA retry path.
+
+**Verified commit:** `02f28d8eb4437491fe7256f94f77124f58b58468`; Windows compatibility QEMU and two reboot checks: https://github.com/darkness22s/Bordify-OS/actions/runs/42566192421 ; normal Bordify image build: https://github.com/darkness22s/Bordify-OS/actions/runs/42566192438 ; combined package diagnostic: https://github.com/darkness22s/Bordify-OS/actions/runs/42566192382 .
+
+**Still absent:** *general dynamic DLL loading and its dependency graph*, production C runtime initialization, `USER32`/`GDI32` Windows and GUI event loop, real multi-thread scheduling, TLS, Windows structured exceptions and unwind, general address-space management, and **native x64 Windows execution** (the existing x64 interpreter only supports restricted fixture instructions). Chrome and 7-Zip still cannot run. Green CI here verifies limited console workload and safe rejection, **not Windows compatibility for most applications**.
+
 Bordify OS currently runs a 32-bit protected-mode x86 kernel, with built-in applications linked directly into the kernel image. There is now a single-process experimental ring-3 model, a small user-memory mapping and syscall ABI, but **not** a production process scheduler, dynamic linker, 64-bit CPU mode, arbitrary-app sandbox or general-purpose Windows/macOS loader. It uses FAT16 8.3 filenames and has a fixed kernel heap. These are hard architectural constraints, not missing file associations.
 
 
