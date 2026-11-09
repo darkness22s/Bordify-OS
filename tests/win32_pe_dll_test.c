@@ -84,6 +84,17 @@ int main(int argc,char **argv) {
     p32(file+0x98u+16u,0x1800u); /* RVA outside executable section */
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
+    /* A virtual executable tail is zero-filled, not file-backed code. */
+    make_fixture(file);
+    p32(file+0x178u+8u,0x800u); /* virtual size exceeds raw 0x600 */
+    p32(file+0x98u+16u,0x1700u); /* entry in unbacked tail */
+    assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                               0x40180000u,&info));
+    p32(file+0x98u+16u,0u);
+    p32(file+0x340u,0x1700u); /* exported code in unbacked tail */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    assert(!win32_pe_dll_resolve(memory,&info,"BordifyAdd",0u));
     make_fixture(file);
     assert(!win32_pe_dll_resolve(memory,&info,"NoSuchExport",0u));
     assert(!win32_pe_dll_resolve(memory,&info,NULL,2u));
