@@ -101,6 +101,10 @@ def run():
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.connect(str(MONITOR))
                 mon = Monitor(sock)
+                # Debian ISOLINUX waits at the "Live system" menu for ENTER.
+                # The previous test only captured the idle menu for 5 minutes.
+                time.sleep(5)
+                mon.command("sendkey ret")
                 deadline = time.monotonic() + TIMEOUT
                 last = None
                 desktop = None
