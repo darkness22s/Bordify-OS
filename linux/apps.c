@@ -29,9 +29,9 @@ static void files_draw(gui_window_t *w) {
     heading(w, "Files", "Your Linux home folder and cross-platform launcher.");
     ui_button(x, y, 200, 42, "Open Home", true, false);
     ui_button(x + 218, y, 220, 42, "Choose an app...", false, false);
-    ui_button(x + 218, y + 54, 220, 42, "Choose macOS .app", false, false);
+    ui_button(x + 218, y + 54, 220, 42, "Import DMG...", false, false);
     gfx_text(&font_ui, x, y + 110, "Windows .exe / .msi: Wine", settings_ink());
-    gfx_text(&font_ui, x, y + 140, "macOS .app / .pkg / Mach-O: Darling (optional)", settings_ink());
+    gfx_text(&font_ui, x, y + 140, "macOS .dmg: import as Bordify .bapp (files only)", settings_ink());
     gfx_text(&font_ui_small, x, y + 198, status, settings_muted());
     gfx_text(&font_ui_small, x, y + 223, "Unknown files open with your Linux default app.", settings_muted());
 }
@@ -44,7 +44,7 @@ static void files_click(gui_window_t *w, int mx, int my) {
     if (ui_point_in(x + 218, y, 220, 42, mx, my))
         spawn("bordify-choose-app", "--choose");
     if (ui_point_in(x + 218, y + 54, 220, 42, mx, my))
-        spawn("bordify-choose-app", "--bundle");
+        spawn("bordify-choose-app", "--choose");
 }
 static void web_draw(gui_window_t *w) {
     int x = gui_content_x(w) + 30, y = gui_content_y(w) + 130;
