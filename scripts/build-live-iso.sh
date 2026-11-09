@@ -13,7 +13,7 @@ cd "$WORK"
 # to discover kernel flavours; disable its duplicate auto-selection step.
 lb config --mode debian --distribution trixie --architectures amd64 \
   --binary-images iso-hybrid --archive-areas "main contrib non-free-firmware" \
-  --debian-installer none --security false --linux-packages none --bootappend-live "boot=live components" \
+  --debian-installer none --initsystem systemd --security false --linux-packages none --bootappend-live "boot=live components" \
   --iso-application "Bordify OS Linux Edition" \
   --iso-publisher "Bordify OS"
 mkdir -p config/archives config/package-lists \

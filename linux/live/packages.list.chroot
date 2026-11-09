@@ -2,8 +2,10 @@
 linux-image-amd64
 live-boot
 live-config
+live-config-systemd
 systemd-sysv
 lightdm
+lightdm-gtk-greeter
 openbox
 xserver-xorg
 xinit
