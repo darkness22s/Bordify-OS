@@ -28,7 +28,7 @@ jobs:
         run: |
           make test
           make -j"$(nproc)" CHROME_PROBE=1
-          make build/apps/winreal.exe
+          make build/apps/winreal.exe build/apps/wincrt.exe
           sudo bash scripts/build-image.sh
       - name: Download genuine Google Chrome installers and 7-Zip utility
         run: |
@@ -57,12 +57,16 @@ jobs:
           python3 tools/windows_pe_probe.py build/apps/winreal.exe \
             --output build/windows-compiler-demo.json \
             | tee build/windows-compiler-demo.txt
+          python3 tools/windows_pe_probe.py build/apps/wincrt.exe \
+            --output build/windows-crt-compiler-demo.json \
+            | tee build/windows-crt-compiler-demo.txt
           {
             echo '## Windows compatibility API gap analysis'
             echo '~~~'
             cat build/windows-dependencies.txt
             cat build/windows-web-setup-dependencies.txt 2>/dev/null || true
             cat build/windows-compiler-demo.txt
+            cat build/windows-crt-compiler-demo.txt
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Try extracting actual Chrome executable from offline installer
@@ -117,6 +121,8 @@ jobs:
             build/windows/7zr.exe "::APPS/SEVEN.EXE"
           mcopy -i "build/windows-probe.img@@1048576" \
             build/apps/winreal.exe "::APPS/WINREAL.EXE"
+          mcopy -i "build/windows-probe.img@@1048576" \
+            build/apps/wincrt.exe "::APPS/WINCRT.EXE"
           if [ -f build/windows/ChromeSetup.exe ]; then
             mcopy -i "build/windows-probe.img@@1048576" \
               build/windows/ChromeSetup.exe "::APPS/WEBSET.EXE"
@@ -153,6 +159,8 @@ jobs:
             grep -F "[win32-stress] repeat=$repeat Win32 file roundtrip exit=0" build/windows-probe-serial.log
           done
           grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-probe-serial.log
+          grep -F "BORDIFY REAL MSVCRT PE32: two DLL imports, strings and heap verified" build/windows-probe-serial.log
+          grep -F "[winapps] independent two-DLL MinGW MSVCRT program: native Win32 attempt returned 0" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: real file size=" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: native Win32 attempt returned" build/windows-probe-serial.log
           grep -F "[kernel] starting desktop" build/windows-probe-serial.log
@@ -187,6 +195,7 @@ jobs:
             grep -F "[win32-stress] repeat=$repeat Win32 file roundtrip exit=0" build/windows-second-serial.log
           done
           grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-second-serial.log
+          grep -F "[winapps] independent two-DLL MinGW MSVCRT program: native Win32 attempt returned 0" build/windows-second-serial.log
           grep -F "[kernel] starting desktop" build/windows-second-serial.log
           if grep -F "PANIC" build/windows-second-serial.log; then exit 1; fi
           mcopy -i "build/windows-probe.img@@1048576" "::APPS/WIN32.TXT" build/windows-second-boot.txt
@@ -202,6 +211,8 @@ jobs:
             build/windows-dependencies.txt
             build/windows-compiler-demo.json
             build/windows-compiler-demo.txt
+            build/windows-crt-compiler-demo.json
+            build/windows-crt-compiler-demo.txt
             build/windows-web-setup-dependencies.json
             build/windows-web-setup-dependencies.txt
             build/windows/archive-list.txt
