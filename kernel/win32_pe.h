@@ -26,11 +26,34 @@
 #define WIN32_PE_CMDLINE_W_OFFSET (WIN32_PE_CMDLINE_A_OFFSET + 256u)
 #define WIN32_PE_CMDLINE_LIMIT 128u
 
+/* Stable failure codes make independent compiled Windows-app diagnostics
+ * actionable without ever executing an unsafe or partially mapped image. */
+enum {
+    WIN32_PE_OK=0,
+    WIN32_PE_BAD_ARGUMENT=1,
+    WIN32_PE_BAD_DOS=2,
+    WIN32_PE_BAD_NT=3,
+    WIN32_PE_BAD_ARCH=4,
+    WIN32_PE_BAD_SUBSYSTEM=5,
+    WIN32_PE_RELOCS_STRIPPED=6,
+    WIN32_PE_UNSUPPORTED_TLS=7,
+    WIN32_PE_BAD_IMAGE_SIZE=8,
+    WIN32_PE_BAD_SECTION_TABLE=9,
+    WIN32_PE_BAD_SECTION=10,
+    WIN32_PE_OVERLAPPING_SECTIONS=11,
+    WIN32_PE_ENTRY_NOT_EXECUTABLE=12,
+    WIN32_PE_BAD_RELOCATIONS=13,
+    WIN32_PE_BAD_IMPORTS=14,
+    WIN32_PE_UNSUPPORTED_DLL=15,
+    WIN32_PE_UNSUPPORTED_API=16
+};
 typedef struct {
     uint32_t entry;
     uint32_t image_size;
     uint32_t imported_functions;
+    uint32_t reject_reason;
 } win32_pe_info_t;
+const char *win32_pe_reason_name(uint32_t reason);
 
 bool win32_pe_stage(const uint8_t *file, size_t file_size,
                     uint8_t *memory, size_t memory_size,
