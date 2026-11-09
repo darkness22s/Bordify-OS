@@ -13,8 +13,8 @@
  * no imported Windows instruction runs at CPL0.
  */
 #define MAX_SECTIONS 16
-#define MAX_IMPORTS 32
-#define BRIDGE_SLOT 64u
+#define MAX_IMPORTS 256
+#define BRIDGE_SLOT WIN32_PE_BRIDGE_SLOT
 
 static uint16_t rd16(const uint8_t *p) {
     return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
@@ -70,6 +70,25 @@ static uint32_t bridge_address(const uint8_t *image, uint32_t size,
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 5u;
     if (name_in_image(image,size,name_rva,"CloseHandle"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 6u;
+    /* Ordinary Windows process metadata functions, not Chrome-specific. */
+    if (name_in_image(image,size,name_rva,"GetCurrentProcessId"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 7u;
+    if (name_in_image(image,size,name_rva,"GetCurrentThreadId"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 8u;
+    if (name_in_image(image,size,name_rva,"GetTickCount"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 9u;
+    if (name_in_image(image,size,name_rva,"GetModuleHandleA"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 10u;
+    if (name_in_image(image,size,name_rva,"GetModuleHandleW"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 11u;
+    if (name_in_image(image,size,name_rva,"GetCommandLineA"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 12u;
+    if (name_in_image(image,size,name_rva,"GetCommandLineW"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 13u;
+    if (name_in_image(image,size,name_rva,"SetLastError"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 14u;
+    if (name_in_image(image,size,name_rva,"IsDebuggerPresent"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 15u;
     return 0;
 }
 
@@ -252,7 +271,8 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
 }
 
 bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
-    if (!memory || !fits(size,WIN32_PE_RUNTIME_OFFSET,BRIDGE_SLOT*7u))
+    if (!memory || !fits(size,WIN32_PE_RUNTIME_OFFSET,
+                           BRIDGE_SLOT*WIN32_PE_BRIDGE_COUNT))
         return false;
     /* Tiny x86 stdcall stubs assembled and inspected for exact calling
      * conventions. Every syscall is invoked from the guest's ring-3
@@ -300,20 +320,95 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         0x53,0x8b,0x5c,0x24,0x08,0xb8,0x06,0,0,0,
         0xcd,0x80,0x5b,0xc2,0x04,0
     };
-    static const uint8_t *const code[7]={
-        exit_process,get_std_handle,write_file,get_last_error,
-        create_file,read_file,close_handle
+    /* Existing services remain at their original indices so all older
+     * independently tested PE32 samples are still byte-for-byte compatible.
+     * x86 stdcall: GetModuleHandle(NULL) returns this process image base;
+     * GetCommandLineA/W return process-private storage, never kernel data. */
+    static const uint8_t constant_one[]={0xb8,1,0,0,0,0xc3};
+    static const uint8_t get_tick_count[]={
+        0xb8,8,0,0,0,0xcd,0x80,0xc3
     };
-    static const size_t lengths[7]={
+    static const uint8_t get_module_handle[]={
+        0x31,0xc0,                    /* xor eax,eax */
+        0x83,0x7c,0x24,0x04,0x00,    /* cmp DWORD [esp+4],0 */
+        0x75,0x05,                    /* non-NULL name: unsupported -> NULL */
+        0xb8,0,0,0,0,                /* mov eax,user_image_base */
+        0xc2,0x04,0                   /* ret 4 */
+    };
+    static const uint8_t get_command_line[]={
+        0xb8,0,0,0,0,0xc3           /* mov eax,process-owned pointer; ret */
+    };
+    static const uint8_t set_last_error[]={
+        0x8b,0x5c,0x24,0x04,        /* mov ebx,[esp+4] */
+        0xb8,9,0,0,0,0xcd,0x80,   /* int 0x80 / case 9 */
+        0xc2,0x04,0               /* ret 4 */
+    };
+    static const uint8_t false_value[]={0x31,0xc0,0xc3};
+    static const uint8_t *const code[WIN32_PE_BRIDGE_COUNT]={
+        exit_process,get_std_handle,write_file,get_last_error,
+        create_file,read_file,close_handle,
+        constant_one,constant_one,get_tick_count,
+        get_module_handle,get_module_handle,
+        get_command_line,get_command_line,set_last_error,false_value
+    };
+    static const size_t lengths[WIN32_PE_BRIDGE_COUNT]={
         sizeof(exit_process),sizeof(get_std_handle),
         sizeof(write_file),sizeof(get_last_error),
-        sizeof(create_file),sizeof(read_file),sizeof(close_handle)
+        sizeof(create_file),sizeof(read_file),sizeof(close_handle),
+        sizeof(constant_one),sizeof(constant_one),sizeof(get_tick_count),
+        sizeof(get_module_handle),sizeof(get_module_handle),
+        sizeof(get_command_line),sizeof(get_command_line),
+        sizeof(set_last_error),sizeof(false_value)
     };
-    for(size_t i=0;i<7;++i){
+    if (!fits(size,WIN32_PE_CMDLINE_W_OFFSET,WIN32_PE_CMDLINE_LIMIT*2u))
+        return false;
+    for(size_t i=0;i<WIN32_PE_BRIDGE_COUNT;++i){
         if(lengths[i]>BRIDGE_SLOT) return false;
         uint8_t *dest=memory+WIN32_PE_RUNTIME_OFFSET+i*BRIDGE_SLOT;
         clear_bytes(dest,BRIDGE_SLOT);
         copy_bytes(dest,code[i],lengths[i]);
+    }
+    uint8_t *stubs=memory+WIN32_PE_RUNTIME_OFFSET;
+    wr32(stubs+10u*BRIDGE_SLOT+10u,WIN32_PE_USER_BASE);
+    wr32(stubs+11u*BRIDGE_SLOT+10u,WIN32_PE_USER_BASE);
+    wr32(stubs+12u*BRIDGE_SLOT+1u,
+         WIN32_PE_USER_BASE+WIN32_PE_CMDLINE_A_OFFSET);
+    wr32(stubs+13u*BRIDGE_SLOT+1u,
+         WIN32_PE_USER_BASE+WIN32_PE_CMDLINE_W_OFFSET);
+    return true;
+}
+
+/* A process's command line is isolated user data at a fixed, guarded
+ * runtime-owned offset, never a pointer into the kernel or the host.
+ * Only simple DOS 8.3 filenames are currently supported; arbitrary
+ * quoting, arguments and Unicode filesystem names need a real loader. */
+bool win32_pe_set_command_line(uint8_t *memory,size_t memory_size,
+                               const char *exe_name) {
+    static const char prefix[]="\"C:\\BORDIFY\\APPS\\";
+    if (!memory || !exe_name ||
+        !fits(memory_size,WIN32_PE_CMDLINE_A_OFFSET,WIN32_PE_CMDLINE_LIMIT) ||
+        !fits(memory_size,WIN32_PE_CMDLINE_W_OFFSET,
+              WIN32_PE_CMDLINE_LIMIT*2u))
+        return false;
+    char line[WIN32_PE_CMDLINE_LIMIT];
+    size_t n=0;
+    for(size_t i=0;i<sizeof(prefix)-1u;++i)line[n++]=prefix[i];
+    size_t name_length=0;
+    for(;exe_name[name_length] && name_length<12u;++name_length) {
+        unsigned char ch=(unsigned char)exe_name[name_length];
+        if (!((ch>='A' && ch<='Z') || (ch>='a' && ch<='z') ||
+              (ch>='0' && ch<='9') || ch=='.' || ch=='_' || ch=='-'))
+            return false;
+        line[n++]=(char)ch;
+    }
+    if (name_length==0u || exe_name[name_length] || n+2u>sizeof(line))
+        return false;
+    line[n++]='"';
+    line[n]=0;
+    for(size_t i=0;i<=n;++i) {
+        memory[WIN32_PE_CMDLINE_A_OFFSET+i]=(uint8_t)line[i];
+        memory[WIN32_PE_CMDLINE_W_OFFSET+2u*i]=(uint8_t)line[i];
+        memory[WIN32_PE_CMDLINE_W_OFFSET+2u*i+1u]=0;
     }
     return true;
 }
