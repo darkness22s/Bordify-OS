@@ -280,16 +280,21 @@ int process_run_win32_pe(const char *directory, const char *filename) {
     }
 
     win32_pe_info_t image;
-    if (!win32_pe_stage(file_bytes, entry.size,
+    if (!win32_pe_stage(file_bytes,entry.size,
                         (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
-                        PROCESS_USER_BYTES, &image) ||
-        !win32_pe_install_bridges(
-             (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
-             PROCESS_USER_BYTES) ||
+                        PROCESS_USER_BYTES,&image)) {
+        kprintf("[win32] PE32 staging rejected: %s (code %u)\n",
+                win32_pe_reason_name(image.reject_reason),
+                image.reject_reason);
+        return -1;
+    }
+    if (!win32_pe_install_bridges(
+            (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+            PROCESS_USER_BYTES) ||
         !win32_pe_set_command_line(
-             (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
-             PROCESS_USER_BYTES,filename)) {
-        kprintf("[win32] unsupported PE32 image, missing imports or unsafe layout\n");
+            (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+            PROCESS_USER_BYTES,filename)) {
+        kprintf("[win32] PE32 process setup rejected: command line or bridges\n");
         return -1;
     }
 
