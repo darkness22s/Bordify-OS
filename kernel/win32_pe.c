@@ -94,7 +94,7 @@ static uint32_t bridge_address(const uint8_t *image, uint32_t size,
 
 static bool fix_imports(uint8_t *memory, uint32_t image_size,
                         uint32_t import_rva, uint32_t import_size,
-                        uint32_t *count) {
+                        uint32_t *count,uint32_t *reason) {
     *count = 0;
     /* An import-free EXE can be admitted, but the Win32 demo uses kernel32. */
     if (import_rva == 0 && import_size == 0) return true;
@@ -114,8 +114,15 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
             terminated = true;
             break;
         }
-        if (!name_in_image(memory, image_size, name, "kernel32.dll") ||
-            !lookup || !iat) return false;
+        if (!name_in_image(memory,image_size,name,"kernel32.dll")) {
+            *reason=WIN32_PE_UNSUPPORTED_DLL;
+            return false;
+        }
+        /* IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk may legally be zero.
+         * In that case the loader reads import names from FirstThunk
+         * before rewriting the IAT, exactly as PE/COFF specifies. */
+        if (!iat) return false;
+        if (!lookup) lookup=iat;
 
         bool found_end = false;
         for (uint32_t j = 0; j < MAX_IMPORTS; ++j) {
@@ -127,7 +134,10 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
             if (value & 0x80000000u) return false; /* ordinal imports omitted */
             if (!fits(image_size, value, 3)) return false;
             uint32_t address = bridge_address(memory, image_size, value + 2u);
-            if (!address) return false; /* missing Win32 API */
+            if (!address) {
+                *reason=WIN32_PE_UNSUPPORTED_API;
+                return false;
+            }
             wr32(memory + iat + delta, address);
             ++*count;
         }
@@ -172,37 +182,70 @@ static bool apply_pe32_relocations(uint8_t *memory,uint32_t image_size,
     return cursor==end;
 }
 
+static bool rejected(win32_pe_info_t *info,uint32_t reason) {
+    if (info) info->reject_reason=reason;
+    return false;
+}
+const char *win32_pe_reason_name(uint32_t code) {
+    switch (code) {
+        case WIN32_PE_OK: return "ready";
+        case WIN32_PE_BAD_ARGUMENT: return "invalid loader arguments";
+        case WIN32_PE_BAD_DOS: return "invalid DOS/MZ header";
+        case WIN32_PE_BAD_NT: return "invalid PE/COFF signature";
+        case WIN32_PE_BAD_ARCH: return "unsupported PE architecture/sections";
+        case WIN32_PE_BAD_SUBSYSTEM: return "unsupported subsystem/PE32 options";
+        case WIN32_PE_RELOCS_STRIPPED: return "non-rebasable PE32 image";
+        case WIN32_PE_UNSUPPORTED_TLS: return "TLS/delay-load not implemented";
+        case WIN32_PE_BAD_IMAGE_SIZE: return "invalid/oversized PE image";
+        case WIN32_PE_BAD_SECTION_TABLE: return "invalid section header table";
+        case WIN32_PE_BAD_SECTION: return "invalid PE32 section extent";
+        case WIN32_PE_OVERLAPPING_SECTIONS: return "overlapping PE32 sections";
+        case WIN32_PE_ENTRY_NOT_EXECUTABLE: return "non-executable entry RVA";
+        case WIN32_PE_BAD_RELOCATIONS: return "unsupported/malformed base relocations";
+        case WIN32_PE_BAD_IMPORTS: return "malformed import directory";
+        case WIN32_PE_UNSUPPORTED_DLL: return "unsupported imported DLL";
+        case WIN32_PE_UNSUPPORTED_API: return "unsupported imported API";
+        default: return "unknown PE32 rejection";
+    }
+}
+
 bool win32_pe_stage(const uint8_t *file, size_t file_size,
                     uint8_t *memory, size_t memory_size,
                     win32_pe_info_t *info) {
-    if (!file || !memory || !info || memory_size < WIN32_PE_MAX_IMAGE) return false;
+    if (!file || !memory || !info || memory_size < WIN32_PE_MAX_IMAGE)
+        return rejected(info,WIN32_PE_BAD_ARGUMENT);
     info->entry = 0;
     info->image_size = 0;
     info->imported_functions = 0;
+    info->reject_reason = WIN32_PE_OK;
 
     if (!fits(file_size, 0, 64) || file[0] != 'M' || file[1] != 'Z')
-        return false;
+        return rejected(info,WIN32_PE_BAD_DOS);
     size_t nt = rd32(file + 0x3c);
-    if (nt < 64 || !fits(file_size, nt, 24)) return false;
+    if (nt < 64 || !fits(file_size, nt, 24))
+        return rejected(info,WIN32_PE_BAD_NT);
     if (file[nt] != 'P' || file[nt + 1] != 'E' ||
-        file[nt + 2] || file[nt + 3]) return false;
+        file[nt + 2] || file[nt + 3])
+        return rejected(info,WIN32_PE_BAD_NT);
     uint16_t machine = rd16(file + nt + 4);
     uint16_t section_count = rd16(file + nt + 6);
     uint16_t optional_size = rd16(file + nt + 20);
     uint16_t flags = rd16(file + nt + 22);
     if (machine != 0x014c || section_count == 0 ||
         section_count > MAX_SECTIONS || optional_size < 224 ||
-        !(flags & 0x0002) || !fits(file_size, nt + 24, optional_size)) return false;
+        !(flags & 0x0002) || !fits(file_size, nt + 24, optional_size))
+        return rejected(info,WIN32_PE_BAD_ARCH);
 
     size_t opt = nt + 24;
     if (rd16(file + opt) != 0x010b ||
         rd16(file + opt + 68) != 3 || /* IMAGE_SUBSYSTEM_WINDOWS_CUI */
-        rd32(file + opt + 92) < 16) return false;
+        rd32(file + opt + 92) < 16)
+        return rejected(info,WIN32_PE_BAD_SUBSYSTEM);
     uint32_t image_base=rd32(file+opt+28);
     uint32_t reloc_rva=rd32(file+opt+96+5u*8u);
     uint32_t reloc_size=rd32(file+opt+96+5u*8u+4u);
     if (image_base!=WIN32_PE_USER_BASE && (flags&0x0001u))
-        return false; /* stripped relocations cannot be safely rebased */
+        return rejected(info,WIN32_PE_RELOCS_STRIPPED);
     uint32_t entry_rva = rd32(file + opt + 16);
     uint32_t image_size = rd32(file + opt + 56);
     uint32_t headers_size = rd32(file + opt + 60);
@@ -210,16 +253,18 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
     uint32_t import_size = rd32(file + opt + 108);
     /* Reject TLS and delayed imports until those loaders exist. */
     if (rd32(file + opt + 96 + 9u * 8u) ||
-        rd32(file + opt + 96 + 13u * 8u)) return false;
+        rd32(file + opt + 96 + 13u * 8u))
+        return rejected(info,WIN32_PE_UNSUPPORTED_TLS);
     if (image_size < 0x2000 || image_size > WIN32_PE_MAX_IMAGE ||
         !entry_rva || entry_rva >= image_size ||
         headers_size < opt + optional_size || headers_size > image_size ||
-        !fits(file_size, 0, headers_size)) return false;
+        !fits(file_size, 0, headers_size))
+        return rejected(info,WIN32_PE_BAD_IMAGE_SIZE);
 
     size_t sections = opt + optional_size;
     if (!fits(file_size, sections, (size_t)section_count * 40u) ||
         !fits(headers_size, sections, (size_t)section_count * 40u))
-        return false;
+        return rejected(info,WIN32_PE_BAD_SECTION_TABLE);
     bool executable_entry = false;
 
     /* Validate complete mapping before copying untrusted sections. */
@@ -233,7 +278,8 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
         uint32_t mapped_size = virtual_size > raw_size ? virtual_size : raw_size;
         if (!mapped_size || !fits(image_size, virtual_rva, mapped_size) ||
             virtual_rva < headers_size ||
-            !fits(file_size, raw_offset, raw_size)) return false;
+            !fits(file_size, raw_offset, raw_size))
+            return rejected(info,WIN32_PE_BAD_SECTION);
         if ((characteristics & 0x20000000u) &&
             entry_rva >= virtual_rva &&
             entry_rva - virtual_rva < mapped_size) executable_entry = true;
@@ -244,10 +290,11 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
             uint32_t r = rd32(prev + 16);
             if (r > n) n = r;
             if (virtual_rva < v + n && v < virtual_rva + mapped_size)
-                return false;
+                return rejected(info,WIN32_PE_OVERLAPPING_SECTIONS);
         }
     }
-    if (!executable_entry) return false;
+    if (!executable_entry)
+        return rejected(info,WIN32_PE_ENTRY_NOT_EXECUTABLE);
 
     clear_bytes(memory, memory_size);
     copy_bytes(memory, file, headers_size);
@@ -260,10 +307,13 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
     }
 
     if (!apply_pe32_relocations(memory,image_size,image_base,
-                                reloc_rva,reloc_size)) return false;
+                                reloc_rva,reloc_size))
+        return rejected(info,WIN32_PE_BAD_RELOCATIONS);
     uint32_t imported = 0;
-    if (!fix_imports(memory, image_size, import_rva, import_size, &imported))
-        return false;
+    uint32_t why=WIN32_PE_BAD_IMPORTS;
+    if (!fix_imports(memory, image_size, import_rva, import_size,
+                     &imported,&why))
+        return rejected(info,why);
     info->entry = WIN32_PE_USER_BASE + entry_rva;
     info->image_size = image_size;
     info->imported_functions = imported;
