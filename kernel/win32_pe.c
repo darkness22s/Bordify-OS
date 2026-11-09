@@ -243,15 +243,17 @@ const char *win32_pe_reason_name(uint32_t code) {
     }
 }
 
-bool win32_pe_stage(const uint8_t *file, size_t file_size,
-                    uint8_t *memory, size_t memory_size,
-                    win32_pe_info_t *info) {
+static bool stage_core(const uint8_t *file, size_t file_size,
+                       uint8_t *memory, size_t memory_size,
+                       win32_pe_info_t *info,bool defer_imports) {
     if (!file || !memory || !info || memory_size < WIN32_PE_MAX_IMAGE)
         return rejected(info,WIN32_PE_BAD_ARGUMENT);
     info->entry = 0;
     info->image_size = 0;
     info->imported_functions = 0;
     info->imported_module_mask = 0;
+    info->import_rva = 0;
+    info->import_size = 0;
     info->reject_reason = WIN32_PE_OK;
 
     if (!fits(file_size, 0, 64) || file[0] != 'M' || file[1] != 'Z')
@@ -347,14 +349,34 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
     uint32_t imported = 0;
     uint32_t imported_modules = 0;
     uint32_t why=WIN32_PE_BAD_IMPORTS;
-    if (!fix_imports(memory, image_size, import_rva, import_size,
-                     &imported,&imported_modules,&why))
+    if(defer_imports) {
+        /* The shared bounded import binder must run before entrypoint.
+         * Keep original INT/IAT contents (including FirstThunk-only images)
+         * intact until actual virtual/real DLL modules are available. */
+        if((import_rva || import_size) &&
+           (!import_rva || import_size<20u ||
+            !fits(image_size,import_rva,import_size)))
+            return rejected(info,WIN32_PE_BAD_IMPORTS);
+    } else if (!fix_imports(memory, image_size, import_rva, import_size,
+                            &imported,&imported_modules,&why))
         return rejected(info,why);
     info->entry = WIN32_PE_USER_BASE + entry_rva;
     info->image_size = image_size;
     info->imported_functions = imported;
     info->imported_module_mask = imported_modules;
+    info->import_rva=import_rva;
+    info->import_size=import_size;
     return true;
+}
+bool win32_pe_stage(const uint8_t *file,size_t file_size,
+                    uint8_t *memory,size_t memory_size,
+                    win32_pe_info_t *info) {
+    return stage_core(file,file_size,memory,memory_size,info,false);
+}
+bool win32_pe_stage_deferred(const uint8_t *file,size_t file_size,
+                             uint8_t *memory,size_t memory_size,
+                             win32_pe_info_t *info) {
+    return stage_core(file,file_size,memory,memory_size,info,true);
 }
 
 bool win32_pe_install_bridges(uint8_t *memory, size_t size) {

@@ -49,7 +49,14 @@ $(BUILD)/apps/chain.dll: apps/win32_chaindll.c $(BUILD)/apps/bordll.dll
 	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
 	  -Wl,--entry,0 -Wl,--image-base,0x11000000 \
 	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
-	  -L$(BUILD)/apps -o $@ $< -lbordll
+	  -L$(BUILD)/apps -Wl,--out-implib,$(BUILD)/apps/libchain.a -o $@ $< -lbordll
+
+$(BUILD)/apps/winstat.exe: apps/win32_static_realc.c $(BUILD)/apps/chain.dll
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib \
+	  -Wl,--entry,_mainCRTStartup -Wl,--subsystem,console \
+	  -Wl,--image-base,0x00400000 -Wl,--enable-reloc-section \
+	  -L$(BUILD)/apps -o $@ $< -lchain -lkernel32
 
 $(BUILD)/apps/winreal.exe: apps/win32_realc.c
 	@mkdir -p $(BUILD)/apps

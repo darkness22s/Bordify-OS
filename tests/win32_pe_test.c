@@ -103,6 +103,10 @@ int main(void) {
     /* Reject unknown Win32 imports rather than jumping to kernel addresses. */
     image[0x200 + (0x12a0 - 0x1000) + 2] = 'X';
     assert(!win32_pe_stage(image, n, memory, 2 * 1024 * 1024, &result));
+    /* The deferred path maps unknown dependencies for the process linker,
+     * but does not mark their thunk addresses executable or resolved. */
+    assert(win32_pe_stage_deferred(image,n,memory,2u*1024u*1024u,&result));
+    assert(result.import_rva && result.import_size);
     free(memory);
     puts("PE32 loader and kernel32 bridge tests: PASS");
     return 0;

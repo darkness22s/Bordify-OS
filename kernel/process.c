@@ -301,7 +301,7 @@ int process_run_win32_pe(const char *directory, const char *filename) {
     }
 
     win32_pe_info_t image;
-    if (!win32_pe_stage(file_bytes,entry.size,
+    if (!win32_pe_stage_deferred(file_bytes,entry.size,
                         (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
                         PROCESS_USER_BYTES,&image)) {
         kprintf("[win32] PE32 staging rejected: %s (code %u)\n",
@@ -328,6 +328,12 @@ int process_run_win32_pe(const char *directory, const char *filename) {
                    PROCESS_USER_BASE,PROCESS_USER_BYTES);
     win32_dll_pin_imports(&win32_dll,image.imported_module_mask);
     win32_dll_set_reader(&win32_dll,&win32_vm,win32_read_dll,NULLPTR);
+    if(!win32_dll_bind_exe_imports(&win32_dll,image.image_size,
+                image.import_rva,image.import_size,&image.imported_functions)) {
+        kprintf("[win32] import-table binding rejected: Win32/DLL error %u\n",
+                win32_dll.last_error);
+        return -1;
+    }
     active_win32=true;
     running = true;
     exit_status = -1;
@@ -336,6 +342,7 @@ int process_run_win32_pe(const char *directory, const char *filename) {
     process_enter(image.entry, PROCESS_USER_BASE + PROCESS_USER_BYTES - 16);
     running = false;
     active_win32=false;
+    win32_dll_release_exe_imports(&win32_dll);
     kprintf("[win32] PE32 process exited %d\n", exit_status);
     return exit_status;
 }

@@ -55,6 +55,8 @@ typedef struct {
     uint32_t image_size;
     uint32_t imported_functions;
     uint32_t imported_module_mask; /* bit 0=kernel32, bit 1=msvcrt */
+    uint32_t import_rva;
+    uint32_t import_size;
     uint32_t reject_reason;
 } win32_pe_info_t;
 const char *win32_pe_reason_name(uint32_t reason);
@@ -62,6 +64,11 @@ const char *win32_pe_reason_name(uint32_t reason);
 bool win32_pe_stage(const uint8_t *file, size_t file_size,
                     uint8_t *memory, size_t memory_size,
                     win32_pe_info_t *info);
+/* Maps the EXE but deliberately leaves its IAT unresolved until the
+ * process-specific DLL manager is initialized. MUST bind before ring 3. */
+bool win32_pe_stage_deferred(const uint8_t *file, size_t file_size,
+                             uint8_t *memory, size_t memory_size,
+                             win32_pe_info_t *info);
 /* Installs ring-3 stdcall bridges; call after stage, before transfer. */
 bool win32_pe_install_bridges(uint8_t *memory, size_t memory_size);
 /* Initializes the process-owned ANSI/UTF-16 command-line strings. */

@@ -28,7 +28,7 @@ jobs:
         run: |
           make test
           make -j"$(nproc)" CHROME_PROBE=1
-          make build/apps/winreal.exe build/apps/wincrt.exe build/apps/bordll.dll build/apps/chain.dll
+          make build/apps/winreal.exe build/apps/wincrt.exe build/apps/bordll.dll build/apps/chain.dll build/apps/winstat.exe
           # Verify the actual independently built PE32 DLL image on the host,
           # before attempting native exported code inside the QEMU guest.
           echo '[pe-dll] compiler-produced DLL image metadata:'
@@ -134,6 +134,8 @@ jobs:
             build/apps/bordll.dll "::APPS/BORDLL.DLL"
           mcopy -i "build/windows-probe.img@@1048576" \
             build/apps/chain.dll "::APPS/CHAIN.DLL"
+          mcopy -i "build/windows-probe.img@@1048576" \
+            build/apps/winstat.exe "::APPS/WINSTAT.EXE"
           if [ -f build/windows/ChromeSetup.exe ]; then
             mcopy -i "build/windows-probe.img@@1048576" \
               build/windows/ChromeSetup.exe "::APPS/WEBSET.EXE"
@@ -172,6 +174,7 @@ jobs:
           grep -F "BORDIFY MAPPED PE32 DLL: native MinGW export executed in ring 3" build/windows-probe-serial.log
           grep -F "BORDIFY CHAINED DLL: imported MinGW export executed in ring 3" build/windows-probe-serial.log
           grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-probe-serial.log
+          grep -F "[winapps] independent static-import MinGW PE32 program: native Win32 attempt returned 0" build/windows-probe-serial.log
           grep -F "BORDIFY REAL MSVCRT PE32: two DLL imports, strings and heap verified" build/windows-probe-serial.log
           grep -F "[winapps] independent two-DLL MinGW MSVCRT program: native Win32 attempt returned 0" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: real file size=" build/windows-probe-serial.log
@@ -210,6 +213,7 @@ jobs:
           grep -F "BORDIFY MAPPED PE32 DLL: native MinGW export executed in ring 3" build/windows-second-serial.log
           grep -F "BORDIFY CHAINED DLL: imported MinGW export executed in ring 3" build/windows-second-serial.log
           grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-second-serial.log
+          grep -F "[winapps] independent static-import MinGW PE32 program: native Win32 attempt returned 0" build/windows-second-serial.log
           grep -F "[winapps] independent two-DLL MinGW MSVCRT program: native Win32 attempt returned 0" build/windows-second-serial.log
           grep -F "[kernel] starting desktop" build/windows-second-serial.log
           if grep -F "PANIC" build/windows-second-serial.log; then exit 1; fi

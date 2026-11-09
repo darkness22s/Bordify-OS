@@ -41,11 +41,19 @@ typedef struct {
     void *reader_context;
     uint16_t builtin_dep_refs[2];
     win32_dll_image_t images[WIN32_DLL_MAX_IMAGES];
+    uint8_t exe_image_deps;
+    uint8_t exe_builtin_deps;
 } win32_dll_t;
 void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
                     uint32_t base,size_t bytes);
 /* Initialize pin state from the validated PE import descriptors. */
 void win32_dll_pin_imports(win32_dll_t *dll,uint32_t mask);
+/* Resolve the static import table of a staged PE32 executable.
+ * The image MUST NOT enter ring 3 until this returns true. */
+bool win32_dll_bind_exe_imports(win32_dll_t *dll,uint32_t image_size,
+                                uint32_t import_rva,uint32_t import_size,
+                                uint32_t *bound_count);
+void win32_dll_release_exe_imports(win32_dll_t *dll);
 /* Map up to four bounded PE32 DLLs from whitelisted FAT16 8.3 basenames.
  * Imports can target kernel32, msvcrt, and other supported mapped DLLs.
  * Unresolved imports, missing exports and dependency cycles fail closed.

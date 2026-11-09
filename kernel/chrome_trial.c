@@ -203,6 +203,7 @@ void chrome_trial_run(void) {
     try_windows(apps.cluster);
     try_other_windows(apps.cluster,"WEBSET.EXE","Chrome web installer");
     try_other_windows(apps.cluster,"WINREAL.EXE","independent MinGW PE32 program");
+    try_other_windows(apps.cluster,"WINSTAT.EXE","independent static-import MinGW PE32 program");
     try_other_windows(apps.cluster,"WINCRT.EXE","independent two-DLL MinGW MSVCRT program");
     try_other_windows(apps.cluster,"SEVEN.EXE","7-Zip standalone utility");
     try_other_windows(apps.cluster,"CHRMAPP.EXE","extracted Chrome application");
