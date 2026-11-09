@@ -43,6 +43,35 @@ int main(void) {
     assert(!win32_dll_load(&dll,BASE+BYTES-1u));
     win32_dll_init(&dll,guest,BASE,BYTES);
     assert(!win32_dll_symbol(&dll,k,BASE+0x2100)); /* process reset */
-    puts("Win32 built-in DLL loading and GetProcAddress: PASS");
+    win32_dll_pin_imports(&dll,3u);
+    assert(win32_dll_get_module(&dll,0u,false)==BASE);
+    assert(win32_dll_get_module(&dll,BASE+0x2000,false)==k);
+    assert(win32_dll_get_module(&dll,BASE+0x2200,false)==WIN32_DLL_MSVCRT_HANDLE);
+    assert(dll.refs[0]==0u && dll.refs[1]==0u);
+    assert(win32_dll_symbol(&dll,k,BASE+0x2100)==tick);
+    assert(!win32_dll_free(&dll,k));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    assert(win32_dll_symbol(&dll,k,BASE+0x2100)==tick);
+    const char *wide="KERNEL32.DLL";
+    for(size_t i=0;i<=strlen(wide);++i) {
+        guest[0x2600u+i*2u]=(uint8_t)wide[i];
+        guest[0x2601u+i*2u]=0u;
+    }
+    assert(win32_dll_get_module(&dll,BASE+0x2600u,true)==k);
+    assert(win32_dll_load_w(&dll,BASE+0x2600u)==k);
+    assert(dll.refs[0]==1u && win32_dll_free(&dll,k));
+    assert(dll.pinned[0] && dll.refs[0]==0u);
+    assert(win32_dll_get_module(&dll,BASE+0x2400,false)==0u);
+    assert(dll.last_error==WIN32_DLL_ERROR_MOD_NOT_FOUND);
+    guest[0x2601u]=1u;
+    assert(!win32_dll_load_w(&dll,BASE+0x2600u));
+    assert(dll.last_error==WIN32_DLL_ERROR_BAD_ARGUMENT);
+    guest[0x2601u]=0u;
+    guest[BYTES-2u]='K';guest[BYTES-1u]=0u;
+    assert(!win32_dll_load_w(&dll,BASE+BYTES-2u));
+    win32_dll_pin_imports(&dll,0u);
+    assert(!win32_dll_get_module(&dll,BASE+0x2000,false));
+    assert(dll.last_error==WIN32_DLL_ERROR_MOD_NOT_FOUND);
+    puts("Win32 imported-module pinning, Unicode names and dynamic lookup: PASS");
     return 0;
 }

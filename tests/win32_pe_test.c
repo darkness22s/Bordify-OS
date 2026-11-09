@@ -24,6 +24,7 @@ int main(void) {
     assert(win32_pe_stage(image, n, memory, 2 * 1024 * 1024, &result));
     assert(result.entry == WIN32_PE_USER_BASE + 0x1000);
     assert(result.image_size == 0x2000 && result.imported_functions == 3);
+    assert(result.imported_module_mask == 1u);
     assert(u32(memory + 0x1280) == WIN32_PE_USER_BASE +
            WIN32_PE_RUNTIME_OFFSET + 2 * 64);
     assert(u32(memory + 0x1284) == WIN32_PE_USER_BASE +
@@ -55,9 +56,10 @@ int main(void) {
     assert(memory[WIN32_PE_CMDLINE_W_OFFSET]==(uint8_t)'"' &&
            memory[WIN32_PE_CMDLINE_W_OFFSET+1u]==0);
     assert(!win32_pe_set_command_line(memory,2u*1024u*1024u,"Bad Name.exe"));
-    assert(memory[WIN32_PE_RUNTIME_OFFSET+10u*64u+9u]==0xb8);
-    assert(u32(memory+WIN32_PE_RUNTIME_OFFSET+10u*64u+10u)==
-           WIN32_PE_USER_BASE);
+    assert(memory[WIN32_PE_RUNTIME_OFFSET+10u*64u+6u]==0xb8);
+    assert(u32(memory+WIN32_PE_RUNTIME_OFFSET+10u*64u+7u)==26u);
+    assert(u32(memory+WIN32_PE_RUNTIME_OFFSET+11u*64u+7u)==27u);
+    assert(u32(memory+WIN32_PE_RUNTIME_OFFSET+32u*64u+7u)==28u);
     assert(u32(memory+WIN32_PE_RUNTIME_OFFSET+12u*64u+1u)==
            WIN32_PE_USER_BASE+WIN32_PE_CMDLINE_A_OFFSET);
     assert(strcmp(win32_pe_reason_name(WIN32_PE_UNSUPPORTED_API),

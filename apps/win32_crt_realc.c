@@ -13,6 +13,10 @@
 __attribute__((noreturn)) void mainCRTStartup(void) {
     static const char success[]=
         "BORDIFY REAL MSVCRT PE32: two DLL imports, strings and heap verified\r\n";
+    HMODULE imported_crt=GetModuleHandleA("msvcrt.dll");
+    if(!imported_crt ||
+       imported_crt!=GetModuleHandleW(L"MSVCRT.DLL") ||
+       !GetProcAddress(imported_crt,"strlen")) ExitProcess(71u);
     char a[80],b[80],c[80];
     const char text[]="windows-runtime";
     if(strlen(text)!=15u) ExitProcess(60u);

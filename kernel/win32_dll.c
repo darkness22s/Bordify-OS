@@ -15,7 +15,8 @@ static const export_t kernel32_exports[]={
     {"GetCommandLineA",12},{"GetCommandLineW",13},
     {"SetLastError",14},{"IsDebuggerPresent",15},
     {"VirtualAlloc",27},{"VirtualFree",28},
-    {"LoadLibraryA",29},{"GetProcAddress",30},{"FreeLibrary",31}
+    {"LoadLibraryA",29},{"GetProcAddress",30},{"FreeLibrary",31},
+    {"LoadLibraryW",32}
 };
 static const export_t msvcrt_exports[]={
     {"strlen",16},{"memcpy",17},{"memset",18},{"memcmp",19},
@@ -38,6 +39,25 @@ static bool read_name(const win32_dll_t *dll,uint32_t address,
     }
     output[64]=0;
     return false; /* unterminated or suspiciously long */
+}
+/* UTF-16LE names stay in user memory and must fit in 64 ASCII code units.
+ * Non-ASCII name resolution needs a real Unicode-aware DLL loader. */
+static bool read_wide_name(const win32_dll_t *dll,uint32_t address,
+                           char output[65]) {
+    if(!in_range(dll,address))return false;
+    size_t offset=(size_t)(address-dll->base);
+    size_t available=dll->bytes-offset;
+    for(size_t i=0;i<64u;++i) {
+        size_t at=i*2u;
+        if(at>available || available-at<2u)return false;
+        uint8_t low=dll->guest[offset+at];
+        uint8_t high=dll->guest[offset+at+1u];
+        if(high!=0u || low>127u)return false;
+        output[i]=(char)low;
+        if(low==0u)return i!=0u;
+    }
+    output[64]=0;
+    return false;
 }
 static char lower_ascii(char c) {
     return (c>='A'&&c<='Z')?(char)(c+('a'-'A')):c;
@@ -66,22 +86,56 @@ void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
     dll->guest=guest;dll->base=base;dll->bytes=bytes;
     dll->last_error=0;
     dll->refs[0]=0;dll->refs[1]=0;
+    dll->pinned[0]=false;dll->pinned[1]=false;
 }
 static int module_id(uint32_t handle) {
     if(handle==WIN32_DLL_KERNEL32_HANDLE)return 0;
     if(handle==WIN32_DLL_MSVCRT_HANDLE)return 1;
     return -1;
 }
+static int module_by_name(const char *name) {
+    if(equals_ci(name,"kernel32.dll")||equals_ci(name,"kernel32"))return 0;
+    if(equals_ci(name,"msvcrt.dll")||equals_ci(name,"msvcrt"))return 1;
+    return -1;
+}
+void win32_dll_pin_imports(win32_dll_t *dll,uint32_t mask) {
+    if(!dll)return;
+    dll->pinned[0]=(mask&1u)!=0u;
+    dll->pinned[1]=(mask&2u)!=0u;
+}
+static uint32_t load_name(win32_dll_t *dll,const char *name) {
+    int id=module_by_name(name);
+    if(id<0)return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
+    if(dll->refs[id]==65535u)return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
+    dll->refs[id]++;
+    dll->last_error=0;
+    return id==0?WIN32_DLL_KERNEL32_HANDLE:WIN32_DLL_MSVCRT_HANDLE;
+}
 uint32_t win32_dll_load(win32_dll_t *dll,uint32_t guest_name) {
     char name[65];
     if(!dll||!read_name(dll,guest_name,name))
         return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-    int id=-1;
-    if(equals_ci(name,"kernel32.dll")||equals_ci(name,"kernel32"))id=0;
-    else if(equals_ci(name,"msvcrt.dll")||equals_ci(name,"msvcrt"))id=1;
-    if(id<0)return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
-    if(dll->refs[id]==65535u)return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
-    dll->refs[id]++;
+    return load_name(dll,name);
+}
+uint32_t win32_dll_load_w(win32_dll_t *dll,uint32_t guest_name) {
+    char name[65];
+    if(!dll||!read_wide_name(dll,guest_name,name))
+        return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
+    return load_name(dll,name);
+}
+uint32_t win32_dll_get_module(win32_dll_t *dll,uint32_t guest_name,bool wide) {
+    if(!dll)return 0;
+    if(guest_name==0u) {
+        dll->last_error=0;
+        return WIN32_PE_USER_BASE;
+    }
+    char name[65];
+    if(!(wide?read_wide_name(dll,guest_name,name):
+               read_name(dll,guest_name,name)))
+        return fail(dll,WIN32_DLL_ERROR_BAD_ARGUMENT);
+    int id=module_by_name(name);
+    if(id<0 || (!dll->pinned[id] && dll->refs[id]==0u))
+        return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
     dll->last_error=0;
     return id==0?WIN32_DLL_KERNEL32_HANDLE:WIN32_DLL_MSVCRT_HANDLE;
 }
@@ -89,7 +143,7 @@ uint32_t win32_dll_symbol(win32_dll_t *dll,uint32_t module,
                           uint32_t guest_symbol) {
     if(!dll)return 0;
     int id=module_id(module);
-    if(id<0||!dll->refs[id])
+    if(id<0||(!dll->refs[id]&&!dll->pinned[id]))
         return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
     /* The Win32 low-word ordinal form is not implemented. */
     if(guest_symbol<=65535u)

@@ -24,7 +24,7 @@
 #define WIN32_PE_RUNTIME_OFFSET (1664u * 1024u)
 /* Keep all import stubs and process-owned strings outside mapped PE sections. */
 #define WIN32_PE_BRIDGE_SLOT 64u
-#define WIN32_PE_BRIDGE_COUNT 32u
+#define WIN32_PE_BRIDGE_COUNT 33u
 #define WIN32_PE_CMDLINE_A_OFFSET (WIN32_PE_RUNTIME_OFFSET + 4096u)
 #define WIN32_PE_CMDLINE_W_OFFSET (WIN32_PE_CMDLINE_A_OFFSET + 256u)
 #define WIN32_PE_CMDLINE_LIMIT 128u
@@ -54,6 +54,7 @@ typedef struct {
     uint32_t entry;
     uint32_t image_size;
     uint32_t imported_functions;
+    uint32_t imported_module_mask; /* bit 0=kernel32, bit 1=msvcrt */
     uint32_t reject_reason;
 } win32_pe_info_t;
 const char *win32_pe_reason_name(uint32_t reason);

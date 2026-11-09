@@ -66,6 +66,20 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
     if (another!=allocation || another[0]!=0 ||
         !VirtualFree(another,0,MEM_RELEASE)) ExitProcess(55u);
 
+    /* Imported kernel32 is present before an explicit LoadLibrary call. */
+    HMODULE imported_kernel=GetModuleHandleA("KERNEL32.DLL");
+    if(!imported_kernel ||
+       GetModuleHandleW(L"kernel32.dll")!=imported_kernel ||
+       !GetProcAddress(imported_kernel,"GetTickCount")) ExitProcess(71u);
+    if(GetModuleHandleA("msvcrt.dll") ||
+       GetLastError()!=ERROR_MOD_NOT_FOUND) ExitProcess(72u);
+    HMODULE wide_crt=LoadLibraryW(L"MsVcRt.DlL");
+    if(!wide_crt || GetModuleHandleW(L"msvcrt.dll")!=wide_crt ||
+       !GetProcAddress(wide_crt,"strlen")) ExitProcess(73u);
+    if(!FreeLibrary(wide_crt) ||
+       GetModuleHandleA("msvcrt.dll")) ExitProcess(74u);
+    if(GetLastError()!=ERROR_MOD_NOT_FOUND) ExitProcess(75u);
+
     /* Dynamically resolve exports from virtual built-in DLL modules. This
      * tests the real MinGW stdcall ABI without pretending to map external
      * DLL images or run Windows DllMain/TLS initializers. */

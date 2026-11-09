@@ -111,13 +111,17 @@ static uint32_t bridge_address(const uint8_t *image, uint32_t size,
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 30u;
     if (name_in_image(image,size,name_rva,"FreeLibrary"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 31u;
+    if (name_in_image(image,size,name_rva,"LoadLibraryW"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 32u;
     return 0;
 }
 
 static bool fix_imports(uint8_t *memory, uint32_t image_size,
                         uint32_t import_rva, uint32_t import_size,
-                        uint32_t *count,uint32_t *reason) {
+                        uint32_t *count,uint32_t *modules,
+                        uint32_t *reason) {
     *count = 0;
+    *modules = 0;
     /* An import-free EXE can be admitted, but the Win32 demo uses kernel32. */
     if (import_rva == 0 && import_size == 0) return true;
     if (!import_rva || !import_size ||
@@ -147,6 +151,7 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
             *reason=WIN32_PE_UNSUPPORTED_DLL;
             return false;
         }
+        *modules|=1u<<(dll-1u);
         /* IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk may legally be zero.
          * In that case the loader reads import names from FirstThunk
          * before rewriting the IAT, exactly as PE/COFF specifies. */
@@ -246,6 +251,7 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
     info->entry = 0;
     info->image_size = 0;
     info->imported_functions = 0;
+    info->imported_module_mask = 0;
     info->reject_reason = WIN32_PE_OK;
 
     if (!fits(file_size, 0, 64) || file[0] != 'M' || file[1] != 'Z')
@@ -339,13 +345,15 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
                                 reloc_rva,reloc_size))
         return rejected(info,WIN32_PE_BAD_RELOCATIONS);
     uint32_t imported = 0;
+    uint32_t imported_modules = 0;
     uint32_t why=WIN32_PE_BAD_IMPORTS;
     if (!fix_imports(memory, image_size, import_rva, import_size,
-                     &imported,&why))
+                     &imported,&imported_modules,&why))
         return rejected(info,why);
     info->entry = WIN32_PE_USER_BASE + entry_rva;
     info->image_size = image_size;
     info->imported_functions = imported;
+    info->imported_module_mask = imported_modules;
     return true;
 }
 
@@ -407,12 +415,14 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
     static const uint8_t get_tick_count[]={
         0xb8,8,0,0,0,0xcd,0x80,0xc3
     };
-    static const uint8_t get_module_handle[]={
-        0x31,0xc0,                    /* xor eax,eax */
-        0x83,0x7c,0x24,0x04,0x00,    /* cmp DWORD [esp+4],0 */
-        0x75,0x05,                    /* non-NULL name: unsupported -> NULL */
-        0xb8,0,0,0,0,                /* mov eax,user_image_base */
-        0xc2,0x04,0                   /* ret 4 */
+    /* Named GetModuleHandle does not increment dynamic reference counts. */
+    static const uint8_t get_module_handle_a[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,26,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t get_module_handle_w[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,27,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
     };
     static const uint8_t get_command_line[]={
         0xb8,0,0,0,0,0xc3           /* mov eax,process-owned pointer; ret */
@@ -461,23 +471,27 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         0x53,0x8b,0x5c,0x24,0x08,0xb8,25,0,0,0,
         0xcd,0x80,0x5b,0xc2,0x04,0
     };
+    static const uint8_t load_library_w[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,28,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
     static const uint8_t *const code[WIN32_PE_BRIDGE_COUNT]={
         exit_process,get_std_handle,write_file,get_last_error,
         create_file,read_file,close_handle,
         constant_one,constant_one,get_tick_count,
-        get_module_handle,get_module_handle,
+        get_module_handle_a,get_module_handle_w,
         get_command_line,get_command_line,set_last_error,false_value,
         crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
         crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
         virtual_alloc,virtual_free,
-        load_library_a,get_proc_address,free_library
+        load_library_a,get_proc_address,free_library,load_library_w
     };
     static const size_t lengths[WIN32_PE_BRIDGE_COUNT]={
         sizeof(exit_process),sizeof(get_std_handle),
         sizeof(write_file),sizeof(get_last_error),
         sizeof(create_file),sizeof(read_file),sizeof(close_handle),
         sizeof(constant_one),sizeof(constant_one),sizeof(get_tick_count),
-        sizeof(get_module_handle),sizeof(get_module_handle),
+        sizeof(get_module_handle_a),sizeof(get_module_handle_w),
         sizeof(get_command_line),sizeof(get_command_line),
         sizeof(set_last_error),sizeof(false_value),
         sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
@@ -485,7 +499,8 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
         sizeof(crt_bridge),sizeof(crt_bridge),
         sizeof(virtual_alloc),sizeof(virtual_free),
-        sizeof(load_library_a),sizeof(get_proc_address),sizeof(free_library)
+        sizeof(load_library_a),sizeof(get_proc_address),sizeof(free_library),
+        sizeof(load_library_w)
     };
     if (!fits(size,WIN32_PE_CMDLINE_W_OFFSET,WIN32_PE_CMDLINE_LIMIT*2u))
         return false;
@@ -497,8 +512,6 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         if(i>=16u && i<27u) dest[14u]=(uint8_t)(10u+i-16u);
     }
     uint8_t *stubs=memory+WIN32_PE_RUNTIME_OFFSET;
-    wr32(stubs+10u*BRIDGE_SLOT+10u,WIN32_PE_USER_BASE);
-    wr32(stubs+11u*BRIDGE_SLOT+10u,WIN32_PE_USER_BASE);
     wr32(stubs+12u*BRIDGE_SLOT+1u,
          WIN32_PE_USER_BASE+WIN32_PE_CMDLINE_A_OFFSET);
     wr32(stubs+13u*BRIDGE_SLOT+1u,

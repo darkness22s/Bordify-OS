@@ -311,6 +311,7 @@ int process_run_win32_pe(const char *directory, const char *filename) {
                   PROCESS_USER_BASE,PROCESS_USER_BYTES);
     win32_dll_init(&win32_dll,(const uint8_t *)(uintptr_t)PROCESS_USER_BASE,
                    PROCESS_USER_BASE,PROCESS_USER_BYTES);
+    win32_dll_pin_imports(&win32_dll,image.imported_module_mask);
     active_win32=true;
     running = true;
     exit_status = -1;
@@ -446,6 +447,19 @@ void process_handle_interrupt(uint32_t *frame) {
             case 25: /* FreeLibrary(HMODULE module) */
                 frame[7]=active_win32 ?
                     win32_dll_free(&win32_dll,frame[4]):0u;
+                if(active_win32)win32_files.last_error=win32_dll.last_error;
+                return;
+            case 26: /* GetModuleHandleA: EBX=optional module name */
+            case 27: { /* GetModuleHandleW: UTF-16LE module name */
+                bool wide=frame[7]==27u;
+                frame[7]=active_win32?
+                    win32_dll_get_module(&win32_dll,frame[4],wide):0u;
+                if(active_win32)win32_files.last_error=win32_dll.last_error;
+                return;
+            }
+            case 28: /* LoadLibraryW: EBX=UTF-16LE module name */
+                frame[7]=active_win32?
+                    win32_dll_load_w(&win32_dll,frame[4]):0u;
                 if(active_win32)win32_files.last_error=win32_dll.last_error;
                 return;
             case 2: /* exit: EBX = signed status */

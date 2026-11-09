@@ -17,11 +17,17 @@ typedef struct {
     uint32_t base;
     size_t bytes;
     uint16_t refs[2];
+    bool pinned[2]; /* DLLs loaded by the executable import table */
     uint32_t last_error;
 } win32_dll_t;
 void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
                     uint32_t base,size_t bytes);
+/* Initialize pin state from the validated PE import descriptors. */
+void win32_dll_pin_imports(win32_dll_t *dll,uint32_t mask);
 uint32_t win32_dll_load(win32_dll_t *dll,uint32_t guest_name);
+uint32_t win32_dll_load_w(win32_dll_t *dll,uint32_t guest_name);
+/* A NULL name returns the executable; named queries do not increment refs. */
+uint32_t win32_dll_get_module(win32_dll_t *dll,uint32_t guest_name,bool wide);
 uint32_t win32_dll_symbol(win32_dll_t *dll,uint32_t module,
                           uint32_t guest_symbol);
 uint32_t win32_dll_free(win32_dll_t *dll,uint32_t module);
