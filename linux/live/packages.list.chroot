@@ -15,6 +15,7 @@ firefox-esr
 xdg-utils
 zenity
 python3
+7zip
 ca-certificates
 fonts-dejavu-core
 wine
