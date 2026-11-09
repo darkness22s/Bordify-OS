@@ -168,7 +168,8 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
     if(!FreeLibrary(init) || GetModuleHandleA("init.dll"))ExitProcess(99u);
     if(GetLastError()!=ERROR_MOD_NOT_FOUND)ExitProcess(100u);
     HMODULE bad=LoadLibraryA("BFAIL.DLL");
-    if(bad || GetLastError()!=ERROR_DLL_INIT_FAILED)ExitProcess(101u);
+    if(bad)ExitProcess(101u);
+    if(GetLastError()!=ERROR_DLL_INIT_FAILED)ExitProcess(107u);
     static const char dynamic_message[]=
         "BORDIFY DYNAMIC DLL: process attach, detach, failure rollback passed\r\n";
     DWORD dynamic_written=0;

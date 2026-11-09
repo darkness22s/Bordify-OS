@@ -35,6 +35,9 @@ jobs:
           make test
           make -j"$(nproc)" CHROME_PROBE=1
           make build/apps/winreal.exe build/apps/wincrt.exe build/apps/bordll.dll build/apps/chain.dll build/apps/init.dll build/apps/bfail.dll build/apps/winstat.exe
+          # Probe the negative fixture as a genuine relocatable image.
+          i686-w64-mingw32-objdump -p build/apps/bfail.dll |
+            grep -E "Base Relocation Directory|ImageBase|AddressOfEntryPoint"
           # Verify the actual independently built PE32 DLL image on the host,
           # before attempting native exported code inside the QEMU guest.
           echo '[pe-dll] compiler-produced DLL image metadata:'
