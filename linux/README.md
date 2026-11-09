@@ -24,11 +24,12 @@ kernel image and experiments remain available from the original Makefile.
 Dependencies (Debian/Ubuntu package names):
 
     sudo apt install build-essential libsdl2-dev python3-pil fonts-dejavu-core \
-        xdg-utils zenity openbox pcmanfm wine wine64
+        xdg-utils zenity openbox pcmanfm wine wine64 7zip
     make -C linux
     python3 -m unittest discover -s linux/tests -p 'test_*.py'
     sudo install -m755 build/linux/bordify-shell /usr/local/bin/bordify-shell
     sudo install -m755 linux/bordify_open.py /usr/local/bin/bordify-open
+    sudo install -m755 linux/bordify_package.py /usr/local/bin/bordify-package
     sudo install -m755 linux/choose_app.py /usr/local/bin/bordify-choose-app
     bordify-shell
 
@@ -78,30 +79,52 @@ Wine app compatibility varies; anti-cheat, some drivers, newer Windows
 APIs and many installers may fail. Proton is not a drop-in replacement
 for the system Wine launcher; a game manager can integrate Proton later.
 
-## macOS apps
+## macOS DMG imports as Bordify .bapp
 
-The dispatcher recognizes Mach-O binaries and valid .app bundle
-executables, converting their host path to Darling's /Volumes/SystemRoot
-mount and calling darling shell. It can attempt to mount a DMG using
-hdiutil attach in Darling; a DMG is a disk image, NOT an executable.
-The Files window includes a directory picker for .app bundles, and the
-dispatcher can pass .pkg installers to Darling's experimental installer
-utility (installer -pkg ... -target /). These are best-effort integrations;
-they do not imply the installed app will run.
+Bordify **no longer tries to launch macOS .app / .pkg / Mach-O programs
+through Darling**. Instead, opening a UDIF .dmg file starts the native
+Bordify importer, which uses Debian's 7-Zip to extract a supported DMG and
+looks for one valid .app bundle. It creates a Bordify-specific **.bapp v1**
+ZIP container with a JSON manifest, the original bundle files, SHA-256
+digests, source-image fingerprint, and explicit non-executable status.
+Bordify recognizes and checks .bapp files without invoking a macOS runtime.
 
-**Darling is not bundled in the live ISO.** It requires separate,
-platform-specific installation/build and system support; consult
-https://docs.darlinghq.org/ . Supported Darwin command-line binaries
-are the practical first target. Cocoa GUI support is experimental in
-upstream Darling and arbitrary macOS apps, Apple Silicon-only binaries,
-modern Chrome for macOS, notarization, Apple services and Mac App Store
-software are NOT promised to work. Neither Apple macOS nor its proprietary
-framework binaries are redistributed here.
+On a Linux development machine, install the Debian package 7zip and run:
+
+    python3 linux/bordify_package.py import ~/Downloads/Example.dmg
+    python3 linux/bordify_package.py inspect ~/.local/share/bordify/apps/Example-*.bapp
+
+Or open the DMG from **Files → Import DMG...**. Converted packages are
+stored under ~/.local/share/bordify/apps by default, named with the source
+SHA-256 prefix. To choose a path explicitly:
+
+    python3 linux/bordify_package.py import Example.dmg --output ./Example.bapp
+
+Open a .bapp with bordify-open to verify its checksums and view its metadata.
+The format is versioned (manifest format org.bordify.bapp, version 1) and
+does not contain an executable launch recipe for macOS binaries.
+
+**This is an importer, not a macOS-to-Linux executable converter.**
+Mach-O code and its dependencies are packaged, **not translated or run**.
+To launch such a program as a native Bordify app, it must be ported or
+reimplemented for Linux (or an independent macOS ABI/runtime integrated).
+Changing DMG bytes into .bapp does not make Apple frameworks, Swift,
+Objective-C, dyld or AppKit work on Linux.
+
+**Current import limitations:** 7-Zip must support the DMG's format,
+encryption is unsupported, archives containing symbolic links/hard links
+are rejected, and imports currently require exactly one .app bundle with
+an executable Mach-O file. Many real DMGs include an /Applications
+symlink and will currently be rejected. Neither arbitrary DMGs nor
+Chrome for macOS are certified to import. The importer verifies archive
+paths, file count, size bounds and digests but **is not a sandbox**;
+untrusted images should be processed in a disposable VM.
+
 
 ## Safety / verification
 
-The launcher validates basic PE and Mach-O file signatures and bounds
-.app executable paths, but these checks are NOT malware detection.
+The launcher validates basic PE signatures and the .bapp reader checks
+ZIP paths and per-file SHA-256 digests. These checks are NOT malware detection.
 Launching foreign code may run untrusted code with your user privileges.
 Do not execute unknown installers; use a disposable VM for untrusted files.
 
