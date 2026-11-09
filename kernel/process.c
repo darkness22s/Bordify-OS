@@ -7,6 +7,7 @@
 #include "string.h"
 #include "win32_pe.h"
 #include "win32_files.h"
+#include "pit.h"
 
 #define PAGE_PRESENT 0x001u
 #define PAGE_RW      0x002u
@@ -284,7 +285,10 @@ int process_run_win32_pe(const char *directory, const char *filename) {
                         PROCESS_USER_BYTES, &image) ||
         !win32_pe_install_bridges(
              (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
-             PROCESS_USER_BYTES)) {
+             PROCESS_USER_BYTES) ||
+        !win32_pe_set_command_line(
+             (uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+             PROCESS_USER_BYTES,filename)) {
         kprintf("[win32] unsupported PE32 image, missing imports or unsafe layout\n");
         return -1;
     }
@@ -366,6 +370,13 @@ void process_handle_interrupt(uint32_t *frame) {
             }
             case 7: /* Win32 GetLastError */
                 frame[7]=active_win32 ? win32_files.last_error : 0u;
+                return;
+            case 8: /* Win32 GetTickCount: PIT ticks in milliseconds */
+                frame[7]=active_win32 ? pit_ticks()*10u : UINT32_MAX;
+                return;
+            case 9: /* Win32 SetLastError: EBX=new error code */
+                if (active_win32) win32_files.last_error=frame[4];
+                frame[7]=active_win32 ? 0u : UINT32_MAX;
                 return;
             case 2: /* exit: EBX = signed status */
                 exit_status = (int)frame[4];
