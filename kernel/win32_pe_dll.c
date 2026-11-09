@@ -221,6 +221,22 @@ bool win32_pe_dll_bind_imports(uint8_t *m,
     /* Bind atomically: a missing dependency must never leave a partly
      * rewritten IAT that could be mistaken for a successfully bound DLL. */
     uint32_t patch_rvas[256],patch_values[256];
+    /* The PE data-directory size may include padding or adjacent thunk
+     * arrays in ordinary compiler output. Protect the actual descriptor
+     * records (including the terminator), not the entire declared span. */
+    size_t descriptor_end=0u;
+    for(size_t pos=offset;
+        fits((size_t)offset+info->import_size,pos,20u);
+        pos+=20u) {
+        const uint8_t *d=m+pos;
+        if(!rd32(d) && !rd32(d+4u) && !rd32(d+8u) &&
+           !rd32(d+12u) && !rd32(d+16u)) {
+            descriptor_end=pos+20u;
+            break;
+        }
+        if((pos-offset)/20u>=16u)return false;
+    }
+    if(!descriptor_end)return false;
     uint32_t descriptors=0u,functions=0u;
     for(size_t cursor=offset;
         fits((size_t)offset+info->import_size,cursor,20u);
@@ -262,7 +278,7 @@ bool win32_pe_dll_bind_imports(uint8_t *m,
             }
             /* Binding must never overwrite import descriptors: they are
              * loader metadata, not writable IAT storage. */
-            if(dest<(uint64_t)offset+info->import_size &&
+            if(dest<(uint64_t)descriptor_end &&
                (uint64_t)offset<dest+4u)return false;
             uint32_t address=lookup(context,dll_name,symbol,ordinal);
             if(!address)return false;
