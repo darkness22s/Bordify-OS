@@ -23,11 +23,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential gcc-multilib nasm python3-pil fonts-dejavu-core \
             dosfstools mtools parted grub-pc-bin grub-common qemu-utils \
-            qemu-system-x86 zlib1g-dev p7zip-full xz-utils
+            qemu-system-x86 zlib1g-dev p7zip-full xz-utils gcc-mingw-w64-i686
       - name: Compile Bordify guest and run original tests
         run: |
           make test
           make -j"$(nproc)" CHROME_PROBE=1
+          make build/apps/winreal.exe
           sudo bash scripts/build-image.sh
       - name: Download genuine Google Chrome installers and 7-Zip utility
         run: |
@@ -53,11 +54,15 @@ jobs:
               --output build/windows-web-setup-dependencies.json \
               | tee build/windows-web-setup-dependencies.txt
           fi
+          python3 tools/windows_pe_probe.py build/apps/winreal.exe \
+            --output build/windows-compiler-demo.json \
+            | tee build/windows-compiler-demo.txt
           {
             echo '## Windows compatibility API gap analysis'
             echo '~~~'
             cat build/windows-dependencies.txt
             cat build/windows-web-setup-dependencies.txt 2>/dev/null || true
+            cat build/windows-compiler-demo.txt
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Try extracting actual Chrome executable from offline installer
@@ -110,6 +115,8 @@ jobs:
             build/windows/ChromeStandaloneSetup64.exe "::APPS/CHROME.EXE"
           mcopy -i "build/windows-probe.img@@1048576" \
             build/windows/7zr.exe "::APPS/SEVEN.EXE"
+          mcopy -i "build/windows-probe.img@@1048576" \
+            build/apps/winreal.exe "::APPS/WINREAL.EXE"
           if [ -f build/windows/ChromeSetup.exe ]; then
             mcopy -i "build/windows-probe.img@@1048576" \
               build/windows/ChromeSetup.exe "::APPS/WEBSET.EXE"
@@ -140,6 +147,8 @@ jobs:
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then exit "$rc"; fi
           cat build/windows-probe-serial.log
           grep -F "[chrome-win] native PE32 launch attempt rejected" build/windows-probe-serial.log
+          grep -F "BORDIFY REAL MINGW PE32: kernel32 process, timer, commandline and WriteFile OK" build/windows-probe-serial.log
+          grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: real file size=" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: native Win32 attempt returned" build/windows-probe-serial.log
           grep -F "[kernel] starting desktop" build/windows-probe-serial.log
@@ -160,6 +169,8 @@ jobs:
           path: |
             build/windows-dependencies.json
             build/windows-dependencies.txt
+            build/windows-compiler-demo.json
+            build/windows-compiler-demo.txt
             build/windows-web-setup-dependencies.json
             build/windows-web-setup-dependencies.txt
             build/windows/archive-list.txt
