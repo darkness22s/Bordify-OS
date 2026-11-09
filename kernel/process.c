@@ -7,6 +7,7 @@
 #include "string.h"
 #include "win32_pe.h"
 #include "win32_files.h"
+#include "win32_crt.h"
 #include "pit.h"
 
 #define PAGE_PRESENT 0x001u
@@ -50,6 +51,7 @@ static bool running;
 static int exit_status;
 static bool active_win32;
 static win32_files_t win32_files;
+static win32_crt_t win32_crt;
 /* The Windows guest never supplies an arbitrary FAT16 destination. */
 static int win32_load_file(uint8_t *out,size_t capacity,void *context) {
     (void)context;
@@ -299,6 +301,8 @@ int process_run_win32_pe(const char *directory, const char *filename) {
     }
 
     win32_files_reset(&win32_files);
+    win32_crt_init(&win32_crt,(uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+                   PROCESS_USER_BASE,PROCESS_USER_BYTES);
     active_win32=true;
     running = true;
     exit_status = -1;
@@ -382,6 +386,13 @@ void process_handle_interrupt(uint32_t *frame) {
             case 9: /* Win32 SetLastError: EBX=new error code */
                 if (active_win32) win32_files.last_error=frame[4];
                 frame[7]=active_win32 ? 0u : UINT32_MAX;
+                return;
+            case 10: case 11: case 12: case 13: case 14: case 15:
+            case 16: case 17: case 18: case 19: case 20:
+                frame[7]=active_win32?
+                    win32_crt_call(&win32_crt,frame[7],
+                                   frame[4],frame[6],frame[5]) :
+                    UINT32_MAX;
                 return;
             case 2: /* exit: EBX = signed status */
                 exit_status = (int)frame[4];
