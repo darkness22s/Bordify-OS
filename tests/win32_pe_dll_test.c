@@ -65,7 +65,7 @@ int main(int argc,char **argv) {
     p16(file+0x96u,2u); /* not DLL */
     assert(!win32_pe_dll_image_size(file,sizeof(file)));
     make_fixture(file);
-    p16(file+0x509u,0x2000u); /* invalid relocation entry */
+    p16(file+0x508u,0x2204u); /* unsupported HIGHLOW replacement type */
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
     make_fixture(file);
