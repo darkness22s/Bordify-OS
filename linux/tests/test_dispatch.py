@@ -73,6 +73,19 @@ class DispatchTests(unittest.TestCase):
         with self.assertRaises(launcher.LaunchError):
             launcher.plan_launch(app, available=self.available)
 
+    def test_darling_pkg_installer(self):
+        path = self.make_file("Installer.pkg", b"xar!" + bytes(16))
+        cmd, env = launcher.plan_launch(path, available=self.available)
+        self.assertEqual(cmd[0:2], ["darling", "shell"])
+        self.assertIn("installer -pkg ", cmd[2])
+        self.assertIn(" -target /", cmd[2])
+        self.assertEqual(env, {})
+
+    def test_bad_pkg_rejected(self):
+        path = self.make_file("Installer.pkg", b"not an installer")
+        with self.assertRaises(launcher.LaunchError):
+            launcher.plan_launch(path, available=self.available)
+
     def test_dmg_is_mount_not_execute(self):
         path = self.make_file("Installer.dmg", b"sample image")
         cmd, _ = launcher.plan_launch(path, available=self.available)

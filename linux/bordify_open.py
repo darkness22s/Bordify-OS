@@ -64,6 +64,14 @@ def plan_launch(path: Path, *, available=shutil.which) -> tuple[list[str], dict[
     path = path.expanduser().resolve(strict=True)
     if not (path.is_file() or path.is_dir()):
         raise LaunchError("Not a regular file or directory")
+    # Flat macOS PKGs are XAR archives; traditional package bundles are dirs.
+    if path.suffix.lower() == ".pkg":
+        if path.is_file() and read_magic(path, 4) != b"xar!":
+            raise LaunchError("Invalid macOS .pkg installer signature")
+        if not available("darling"):
+            raise LaunchError("Darling is required for experimental macOS PKG installation")
+        inside = "/Volumes/SystemRoot" + str(path)
+        return ["darling", "shell", "installer -pkg " + shlex.quote(inside) + " -target /"], {}
     if path.is_dir() and path.suffix.lower() == ".app":
         path = resolve_macos_bundle(path)
     elif path.is_dir():

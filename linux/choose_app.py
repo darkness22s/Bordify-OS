@@ -8,8 +8,12 @@ def main():
     if not shutil.which("zenity"):
         print("Install zenity for the graphical file picker", file=sys.stderr)
         return 127
-    result = subprocess.run(["zenity", "--file-selection",
-                             "--title=Open an app in Bordify OS"], capture_output=True, text=True)
+    bundle = "--bundle" in sys.argv[1:]
+    command = ["zenity", "--file-selection"]
+    if bundle:
+        command.append("--directory")
+    command.append("--title=" + ("Open a macOS .app bundle" if bundle else "Open an app in Bordify OS"))
+    result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode:
         return 0 if result.returncode == 1 else result.returncode
     chosen = result.stdout.strip()

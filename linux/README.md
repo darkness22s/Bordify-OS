@@ -84,6 +84,10 @@ The dispatcher recognizes Mach-O binaries and valid .app bundle
 executables, converting their host path to Darling's /Volumes/SystemRoot
 mount and calling darling shell. It can attempt to mount a DMG using
 hdiutil attach in Darling; a DMG is a disk image, NOT an executable.
+The Files window includes a directory picker for .app bundles, and the
+dispatcher can pass .pkg installers to Darling's experimental installer
+utility (installer -pkg ... -target /). These are best-effort integrations;
+they do not imply the installed app will run.
 
 **Darling is not bundled in the live ISO.** It requires separate,
 platform-specific installation/build and system support; consult
