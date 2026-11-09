@@ -29,7 +29,7 @@ test: all $(OUT)/settings-test
 	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy BORDIFY_SMOKE_FRAMES=4 \
 	  BORDIFY_SMOKE_BMP=$(OUT)/desktop.bmp $(OUT)/bordify-shell
 	$(PYTHON) tests/check_desktop.py $(OUT)/desktop.bmp
-	@dir=$(mktemp -d); HOME="$dir" $(OUT)/settings-test; code=$?; rm -rf "$dir"; exit $code
+	$(PYTHON) tests/check_settings.py $(OUT)/settings-test
 
 clean:
 	rm -f $(OUT)/bordify-shell $(OUT)/desktop.bmp $(OUT)/settings-test
