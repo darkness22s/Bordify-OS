@@ -28,6 +28,7 @@ cp config/archives/debian-security.list.chroot config/archives/debian-security.l
 cp "$ROOT/linux/live/packages.list.chroot" config/package-lists/bordify.list.chroot
 install -m 755 "$ROOT/build/linux/bordify-shell" config/includes.chroot/usr/local/bin/bordify-shell
 install -m 755 "$ROOT/linux/bordify_open.py" config/includes.chroot/usr/local/bin/bordify-open
+install -m 755 "$ROOT/linux/bordify_package.py" config/includes.chroot/usr/local/bin/bordify-package
 install -m 755 "$ROOT/linux/choose_app.py" config/includes.chroot/usr/local/bin/bordify-choose-app
 install -m 755 "$ROOT/linux/live/session.sh" config/includes.chroot/usr/local/bin/bordify-session
 install -m 644 "$ROOT/linux/live/xsession.desktop" config/includes.chroot/usr/share/xsessions/bordify.desktop
