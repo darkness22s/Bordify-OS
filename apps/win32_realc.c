@@ -48,6 +48,24 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
     }
     SetLastError(0x1234u);
     if (GetLastError()!=0x1234u) ExitProcess(48u);
+    /* Test an ordinary compiler-emitted call to the actual kernel32 ABI.
+     * Allocations must be ring-3 private, 4-KiB aligned, zero-initialized,
+     * and safely reusable only after VirtualFree(MEM_RELEASE). */
+    char *allocation=(char *)VirtualAlloc(0,8192u,
+                          MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+    if (!allocation || ((ULONG_PTR)allocation&4095u)) ExitProcess(50u);
+    if (allocation[0]!=0 || allocation[4096]!=0) ExitProcess(51u);
+    allocation[0]='B';
+    allocation[4096]='X';
+    if (allocation[0]!='B' || allocation[4096]!='X' ||
+        !VirtualFree(allocation,0,MEM_RELEASE)) ExitProcess(52u);
+    if (VirtualFree(allocation,0,MEM_RELEASE)) ExitProcess(53u);
+    if (GetLastError()!=ERROR_INVALID_PARAMETER) ExitProcess(54u);
+    char *another=(char *)VirtualAlloc(0,4096u,
+                          MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+    if (another!=allocation || another[0]!=0 ||
+        !VirtualFree(another,0,MEM_RELEASE)) ExitProcess(55u);
+
     HANDLE output=GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD written=0;
     DWORD length=(DWORD)(sizeof(message)-1u);
