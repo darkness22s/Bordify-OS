@@ -66,6 +66,29 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
     if (another!=allocation || another[0]!=0 ||
         !VirtualFree(another,0,MEM_RELEASE)) ExitProcess(55u);
 
+    /* Dynamically resolve exports from virtual built-in DLL modules. This
+     * tests the real MinGW stdcall ABI without pretending to map external
+     * DLL images or run Windows DllMain/TLS initializers. */
+    HMODULE kernel32=LoadLibraryA("kernel32.dll");
+    if (!kernel32) ExitProcess(56u);
+    FARPROC tick_symbol=GetProcAddress(kernel32,"GetTickCount");
+    if (!tick_symbol) ExitProcess(57u);
+    DWORD (WINAPI *tick_dynamic)(void)=(DWORD (WINAPI *)(void))tick_symbol;
+    if ((DWORD)(tick_dynamic()-GetTickCount())>1000u) ExitProcess(58u);
+    if (GetProcAddress(kernel32,"BordifyMissingExport")!=0)
+        ExitProcess(59u);
+    if (GetLastError()!=ERROR_PROC_NOT_FOUND) ExitProcess(60u);
+    HMODULE crt=LoadLibraryA("msvcrt.dll");
+    if (!crt) ExitProcess(61u);
+    FARPROC strlen_symbol=GetProcAddress(crt,"strlen");
+    if (!strlen_symbol) ExitProcess(62u);
+    unsigned (__cdecl *strlen_dynamic)(const char *)=
+        (unsigned (__cdecl *)(const char *))strlen_symbol;
+    if (strlen_dynamic("Bordify")!=7u) ExitProcess(63u);
+    if (!FreeLibrary(crt) || !FreeLibrary(kernel32)) ExitProcess(64u);
+    if (FreeLibrary(kernel32)) ExitProcess(65u);
+    if (GetLastError()!=ERROR_INVALID_HANDLE) ExitProcess(66u);
+
     HANDLE output=GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD written=0;
     DWORD length=(DWORD)(sizeof(message)-1u);
