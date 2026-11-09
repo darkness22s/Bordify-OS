@@ -159,7 +159,7 @@ void process_init(void) {
      * Identity-map the 32-bit address space for the existing kernel, using
      * supervisor-only 4 MiB pages. MMIO and the GRUB framebuffer therefore
      * retain their addresses. The single user PDE replaces the 1-GiB
-     * identity mapping with a bounded 2 MiB of explicitly user-accessible RAM.
+     * identity mapping with a bounded 4 MiB of explicitly user-accessible RAM.
      * This is a transitional design, NOT mature VM management.
      */
     for (uint32_t i = 0; i < 1024; ++i) {

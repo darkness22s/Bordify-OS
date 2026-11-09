@@ -6,8 +6,8 @@
  * Heap is explicitly below the stack reservation and outside the PE image.
  * Every service validates guest addresses and never follows kernel pointers.
  */
-#define WIN32_CRT_HEAP_START (1728u * 1024u)
-#define WIN32_CRT_HEAP_END (1984u * 1024u)
+#define WIN32_CRT_HEAP_START (3664u * 1024u)
+#define WIN32_CRT_HEAP_END (4000u * 1024u)
 #define WIN32_CRT_MAX_ALLOCS 64u
 #define WIN32_CRT_MAX_STRING (64u * 1024u)
 

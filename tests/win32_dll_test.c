@@ -5,7 +5,7 @@
 #include "win32_dll.h"
 #include "win32_pe.h"
 #define BASE 0x40000000u
-#define BYTES (2u*1024u*1024u)
+#define BYTES (4u*1024u*1024u)
 static uint8_t guest[BYTES];
 int main(void) {
     win32_dll_t dll;

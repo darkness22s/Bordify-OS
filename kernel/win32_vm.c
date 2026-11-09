@@ -1,95 +1,109 @@
 #include "win32_vm.h"
 
-/* The arena is already mapped as ring-3 pages by process_init.
- * A free always zeroes the entire released run to prevent stale data leaks
- * into the next allocation in the same process. */
-void win32_vm_init(win32_vm_t *vm,uint8_t *guest,uint32_t base,size_t bytes) {
-    if (!vm) return;
-    vm->guest=guest;vm->base=base;vm->bytes=bytes;
-    vm->used_pages=0;vm->module_pages=0;vm->last_error=0;
-    for(unsigned i=0;i<WIN32_VM_PAGE_COUNT;++i)vm->runs[i]=0;
+/* A 512-page bitmap replaces the former 32-bit word. Every run is
+ * validated before its ownership bits or guest bytes are changed. */
+static bool page_bit(const uint32_t *bitmap,uint32_t page) {
+    return (bitmap[page>>5u] & (1u<<(page&31u)))!=0u;
+}
+static void set_page(uint32_t *bitmap,uint32_t page,bool value) {
+    uint32_t bit=1u<<(page&31u);
+    if(value)bitmap[page>>5u]|=bit;
+    else bitmap[page>>5u]&=~bit;
 }
 static uint32_t failure(win32_vm_t *vm,uint32_t code) {
-    if(vm) vm->last_error=code;
-    return 0;
+    if(vm)vm->last_error=code;
+    return 0u;
+}
+void win32_vm_init(win32_vm_t *vm,uint8_t *guest,uint32_t base,size_t bytes) {
+    if(!vm)return;
+    vm->guest=guest;vm->base=base;vm->bytes=bytes;vm->last_error=0u;
+    for(uint32_t i=0;i<WIN32_VM_PAGE_COUNT;++i)vm->runs[i]=0u;
+    for(uint32_t i=0;i<WIN32_VM_BITMAP_WORDS;++i) {
+        vm->used_pages[i]=0u;
+        vm->module_pages[i]=0u;
+    }
+}
+static bool run_used(const win32_vm_t *vm,uint32_t first,uint32_t pages) {
+    for(uint32_t i=first;i<first+pages;++i)
+        if(page_bit(vm->used_pages,i))return true;
+    return false;
+}
+static void mark_run(uint32_t *bitmap,uint32_t first,uint32_t pages,
+                     bool value) {
+    for(uint32_t i=first;i<first+pages;++i)set_page(bitmap,i,value);
+}
+static void zero_run(win32_vm_t *vm,uint32_t first,uint32_t pages) {
+    uint32_t offset=WIN32_VM_START+first*WIN32_VM_PAGE_SIZE;
+    for(uint32_t i=0;i<pages*WIN32_VM_PAGE_SIZE;++i)
+        vm->guest[offset+i]=0u;
 }
 uint32_t win32_vm_alloc(win32_vm_t *vm,uint32_t addr,uint32_t size,
                         uint32_t flags,uint32_t protect) {
     if(!vm || !vm->guest || vm->bytes<WIN32_VM_END ||
-       addr!=0u || size==0u ||
+       addr!=0u || !size ||
        flags!=(WIN32_VM_MEM_COMMIT|WIN32_VM_MEM_RESERVE) ||
        protect!=WIN32_VM_PAGE_READWRITE)
         return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
-    if(size>(WIN32_VM_END-WIN32_VM_START))
+    if(size>WIN32_VM_END-WIN32_VM_START)
         return failure(vm,WIN32_VM_ERROR_NOT_ENOUGH_MEMORY);
     uint32_t pages=(size+WIN32_VM_PAGE_SIZE-1u)/WIN32_VM_PAGE_SIZE;
     for(uint32_t first=0;first+pages<=WIN32_VM_PAGE_COUNT;++first) {
-        /* Full-arena requests avoid shifting uint32_t by 32. */
-        uint32_t mask=pages==32u ? 0xffffffffu :
-                      ((1u<<pages)-1u)<<first;
-        if((vm->used_pages&mask)!=0u)continue;
-        vm->used_pages|=mask;
-        vm->runs[first]=(uint8_t)pages;
-        uint32_t off=WIN32_VM_START+first*WIN32_VM_PAGE_SIZE;
-        for(uint32_t i=0;i<pages*WIN32_VM_PAGE_SIZE;++i)
-            vm->guest[off+i]=0;
-        vm->last_error=0;
-        return vm->base+off;
+        if(run_used(vm,first,pages))continue;
+        mark_run(vm->used_pages,first,pages,true);
+        vm->runs[first]=(uint16_t)pages;
+        zero_run(vm,first,pages);
+        vm->last_error=0u;
+        return vm->base+WIN32_VM_START+first*WIN32_VM_PAGE_SIZE;
     }
     return failure(vm,WIN32_VM_ERROR_NOT_ENOUGH_MEMORY);
 }
-uint32_t win32_vm_free(win32_vm_t *vm,uint32_t addr,uint32_t size,
-                       uint32_t flags) {
+static bool valid_run(win32_vm_t *vm,uint32_t addr,uint32_t size,
+                      uint32_t flags,uint32_t *first,uint32_t *pages) {
     if(!vm || !vm->guest || vm->bytes<WIN32_VM_END ||
        size!=0u || flags!=WIN32_VM_MEM_RELEASE ||
        addr<vm->base+WIN32_VM_START ||
        addr>=vm->base+WIN32_VM_END ||
        (addr-vm->base-WIN32_VM_START)%WIN32_VM_PAGE_SIZE)
+        return false;
+    *first=(addr-vm->base-WIN32_VM_START)/WIN32_VM_PAGE_SIZE;
+    *pages=vm->runs[*first];
+    if(!*pages || *first+*pages>WIN32_VM_PAGE_COUNT)return false;
+    for(uint32_t i=*first;i<*first+*pages;++i)
+        if(!page_bit(vm->used_pages,i))return false;
+    return true;
+}
+uint32_t win32_vm_free(win32_vm_t *vm,uint32_t addr,uint32_t size,
+                       uint32_t flags) {
+    uint32_t first=0u,pages=0u;
+    if(!valid_run(vm,addr,size,flags,&first,&pages))
         return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
-    uint32_t first=(addr-vm->base-WIN32_VM_START)/WIN32_VM_PAGE_SIZE;
-    uint32_t pages=vm->runs[first];
-    if(!pages || first+pages>WIN32_VM_PAGE_COUNT)
-        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
-    uint32_t mask=pages==32u ? 0xffffffffu :
-                  ((1u<<pages)-1u)<<first;
-    if(vm->module_pages&mask)
-        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
-    vm->runs[first]=0;
-    vm->used_pages&=~mask;
-    uint32_t off=WIN32_VM_START+first*WIN32_VM_PAGE_SIZE;
-    for(uint32_t i=0;i<pages*WIN32_VM_PAGE_SIZE;++i)
-        vm->guest[off+i]=0;
-    vm->last_error=0;
+    for(uint32_t i=first;i<first+pages;++i)
+        if(page_bit(vm->module_pages,i))
+            return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
+    vm->runs[first]=0u;
+    mark_run(vm->used_pages,first,pages,false);
+    zero_run(vm,first,pages);
+    vm->last_error=0u;
     return 1u;
 }
-
-/* Allocate inside the existing ring-3 page table, and mark the run as
- * module-owned. This is NOT a general memory permission/W^X manager. */
 uint32_t win32_vm_alloc_module(win32_vm_t *vm,uint32_t size) {
     uint32_t addr=win32_vm_alloc(vm,0u,size,
                       WIN32_VM_MEM_COMMIT|WIN32_VM_MEM_RESERVE,
                       WIN32_VM_PAGE_READWRITE);
     if(!addr)return 0u;
     uint32_t first=(addr-vm->base-WIN32_VM_START)/WIN32_VM_PAGE_SIZE;
-    uint32_t count=vm->runs[first];
-    uint32_t mask=count==32u?0xffffffffu:((1u<<count)-1u)<<first;
-    vm->module_pages|=mask;
+    mark_run(vm->module_pages,first,vm->runs[first],true);
     return addr;
 }
 uint32_t win32_vm_free_module(win32_vm_t *vm,uint32_t addr) {
-    if(!vm || !vm->guest || addr<vm->base+WIN32_VM_START ||
-       addr>=vm->base+WIN32_VM_END ||
-       (addr-vm->base-WIN32_VM_START)%WIN32_VM_PAGE_SIZE)
+    uint32_t first=0u,pages=0u;
+    if(!valid_run(vm,addr,0u,WIN32_VM_MEM_RELEASE,&first,&pages))
         return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
-    uint32_t first=(addr-vm->base-WIN32_VM_START)/WIN32_VM_PAGE_SIZE;
-    uint32_t count=vm->runs[first];
-    if(!count || first+count>WIN32_VM_PAGE_COUNT)
-        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
-    uint32_t mask=count==32u?0xffffffffu:((1u<<count)-1u)<<first;
-    if((vm->module_pages&mask)!=mask)
-        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
-    vm->module_pages&=~mask;
-    uint32_t ok=win32_vm_free(vm,addr,0u,WIN32_VM_MEM_RELEASE);
-    if(!ok)vm->module_pages|=mask;
-    return ok;
+    for(uint32_t i=first;i<first+pages;++i)
+        if(!page_bit(vm->module_pages,i))
+            return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
+    mark_run(vm->module_pages,first,pages,false);
+    uint32_t result=win32_vm_free(vm,addr,0u,WIN32_VM_MEM_RELEASE);
+    if(!result)mark_run(vm->module_pages,first,pages,true);
+    return result;
 }

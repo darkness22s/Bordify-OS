@@ -5,7 +5,7 @@
 #include "win32_crt.h"
 
 #define BASE 0x40000000u
-#define BYTES (2u*1024u*1024u)
+#define BYTES (4u*1024u*1024u)
 static uint8_t memory[BYTES];
 static win32_crt_t rt;
 static uint32_t call(uint32_t n,uint32_t a,uint32_t b,uint32_t c) {

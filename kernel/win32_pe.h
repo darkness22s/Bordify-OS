@@ -21,7 +21,7 @@
  */
 #define WIN32_PE_USER_BASE 0x40000000u
 #define WIN32_PE_MAX_IMAGE (1536u * 1024u)
-#define WIN32_PE_RUNTIME_OFFSET (1664u * 1024u)
+#define WIN32_PE_RUNTIME_OFFSET (3584u * 1024u)
 /* Keep all import stubs and process-owned strings outside mapped PE sections. */
 #define WIN32_PE_BRIDGE_SLOT 64u
 #define WIN32_PE_BRIDGE_COUNT 33u
