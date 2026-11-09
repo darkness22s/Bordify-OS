@@ -61,6 +61,17 @@ static win32_dll_t win32_dll;
 #define WIN32_DLL_INIT_RETURN_EIP (WIN32_DLL_INIT_STUB+25u)
 static bool dll_entry_active;
 static bool dll_entry_result;
+/* Only one guest thread exists. A dynamic DllMain callback is injected
+ * into that thread's pending syscall return frame, not executed in ring 0.
+ * Preserve its original bridge EIP and stack until the callback finishes. */
+typedef struct {
+    bool active;
+    uint32_t handle;
+    uint32_t saved_eip;
+    uint32_t saved_esp;
+    uint8_t reason; /* 1=PROCESS_ATTACH, 0=PROCESS_DETACH */
+} win32_dynamic_entry_t;
+static win32_dynamic_entry_t dynamic_entry;
 /* The Windows guest never supplies an arbitrary FAT16 destination. */
 static int win32_load_file(uint8_t *out,size_t capacity,void *context) {
     (void)context;
@@ -288,29 +299,37 @@ int process_run_elf32(const char *directory, const char *filename) {
 /* DllMain(HINSTANCE,DWORD,LPVOID) uses stdcall and returns BOOL.
  * Prepare its arguments in the user stack and enter CPL3. Never directly
  * call a guest entrypoint from the supervisor. Syscall 29 returns here. */
-static bool win32_call_dll_entry(uint32_t module,uint32_t entry,
-                                uint8_t reason) {
+/* DllMain(HINSTANCE,DWORD,LPVOID) is stdcall, returning BOOL.
+ * The trampoline executes only with ring-3 CS/SS; no guest code is
+ * callable from the kernel. The last syscall returns to its caller. */
+static bool win32_prepare_dll_entry(uint32_t module,uint32_t entry,
+                                    uint8_t reason) {
     if(!active_win32 || !user_range(entry,1u) ||
        !user_range(WIN32_DLL_INIT_STUB,27u) ||
        reason>1u || !module)return false;
     uint8_t *code=(uint8_t *)(uintptr_t)WIN32_DLL_INIT_STUB;
     static const uint8_t thunk[27]={
-        0x6a,0x00,                  /* push 0: reserved */
-        0x6a,0x01,                  /* push reason */
-        0x68,0,0,0,0,              /* push HINSTANCE */
-        0xb8,0,0,0,0,              /* mov eax,DllMain guest EIP */
-        0xff,0xd0,                 /* call eax */
-        0x89,0xc3,                 /* mov ebx,eax (BOOL) */
-        0xb8,29,0,0,0,             /* special syscall return */
-        0xcd,0x80,                 /* int 0x80 */
-        0x0f,0x0b                  /* ud2: impossible fallthrough */
+        0x6a,0x00,             /* push reserved */
+        0x6a,0x01,             /* push attach/detach reason */
+        0x68,0,0,0,0,          /* push HMODULE */
+        0xb8,0,0,0,0,          /* mov eax,entry */
+        0xff,0xd0,            /* call eax */
+        0x89,0xc3,            /* mov ebx,eax: DllMain BOOL */
+        0xb8,29,0,0,0,        /* syscall #29: complete callback */
+        0xcd,0x80,
+        0x0f,0x0b
     };
     kmemcpy(code,thunk,sizeof(thunk));
     code[3]=reason;
     for(unsigned i=0;i<4u;++i) {
-        code[5u+i]=(uint8_t)(module>>(i*8u));
-        code[10u+i]=(uint8_t)(entry>>(i*8u));
+        code[5u+i]=(uint8_t)(module>>(8u*i));
+        code[10u+i]=(uint8_t)(entry>>(8u*i));
     }
+    return true;
+}
+static bool win32_call_dll_entry(uint32_t module,uint32_t entry,
+                                uint8_t reason) {
+    if(!win32_prepare_dll_entry(module,entry,reason))return false;
     dll_entry_active=true;
     dll_entry_result=false;
     running=true;
@@ -319,6 +338,69 @@ static bool win32_call_dll_entry(uint32_t module,uint32_t entry,
     running=false;
     dll_entry_active=false;
     return dll_entry_result;
+}
+static bool begin_dynamic_entry(uint32_t *frame,uint32_t module,
+                                uint32_t entry,uint8_t reason,
+                                unsigned bridge_slot) {
+    uint32_t expected=WIN32_PE_USER_BASE+WIN32_PE_RUNTIME_OFFSET+
+                       bridge_slot*WIN32_PE_BRIDGE_SLOT+12u;
+    if(dynamic_entry.active || dll_entry_active || !frame ||
+       frame[10]!=expected || !user_range(frame[13],12u) ||
+       !win32_prepare_dll_entry(module,entry,reason))
+        return false;
+    dynamic_entry.active=true;
+    dynamic_entry.handle=module;
+    dynamic_entry.saved_eip=frame[10];
+    dynamic_entry.saved_esp=frame[13];
+    dynamic_entry.reason=reason;
+    frame[10]=WIN32_DLL_INIT_STUB; /* return from int 80 directly to CPL3 */
+    frame[7]=0u;
+    return true;
+}
+static uint32_t win32_guest_load(uint32_t *frame,bool wide) {
+    if(!active_win32 || dynamic_entry.active)return 0u;
+    /* Guarded dynamic loading can prepare one new initialized module.
+     * Recursively importing an uninitialized DLL is deliberately rejected. */
+    win32_dll.allow_dynamic_init=!dll_entry_active;
+    uint32_t handle=wide?win32_dll_load_w(&win32_dll,frame[4]):
+                         win32_dll_load(&win32_dll,frame[4]);
+    win32_dll.allow_dynamic_init=false;
+    win32_files.last_error=win32_dll.last_error;
+    if(!handle)return 0u;
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i) {
+        const win32_dll_image_t *m=&win32_dll.images[i];
+        if(m->state!=2u || m->handle!=handle)continue;
+        if(!m->info.entry_rva || m->initialized)return handle;
+        if(!begin_dynamic_entry(frame,handle,
+                handle+m->info.entry_rva,1u,wide?32u:29u)) {
+            (void)win32_dll_free(&win32_dll,handle);
+            win32_files.last_error=WIN32_DLL_ERROR_INIT_FAILED;
+            return 0u;
+        }
+        return 0u; /* EIP changed: pending guest callback */
+    }
+    return handle; /* virtual kernel32/msvcrt module */
+}
+static uint32_t win32_guest_free(uint32_t *frame) {
+    if(!active_win32 || dynamic_entry.active)return 0u;
+    uint32_t handle=frame[4];
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i) {
+        const win32_dll_image_t *m=&win32_dll.images[i];
+        if(m->state!=2u || m->handle!=handle)continue;
+        if(m->initialized && m->info.entry_rva &&
+           m->refs==1u && m->dep_refs==0u) {
+            if(!begin_dynamic_entry(frame,handle,
+                    handle+m->info.entry_rva,0u,31u)) {
+                win32_files.last_error=WIN32_DLL_ERROR_INIT_FAILED;
+                return 0u;
+            }
+            return 0u;
+        }
+        break;
+    }
+    uint32_t ok=win32_dll_free(&win32_dll,handle);
+    win32_files.last_error=win32_dll.last_error;
+    return ok;
 }
 int process_run_win32_pe(const char *directory, const char *filename) {
     if (!ready || running || !fat16_mounted()) return -1;
@@ -375,6 +457,7 @@ int process_run_win32_pe(const char *directory, const char *filename) {
         return -1;
     }
     active_win32=true;
+    dynamic_entry.active=false;
     exit_status=-1;
     uint32_t modules[WIN32_DLL_MAX_IMAGES]={0u};
     uint32_t entries[WIN32_DLL_MAX_IMAGES]={0u};
@@ -397,6 +480,9 @@ int process_run_win32_pe(const char *directory, const char *filename) {
             win32_dll_release_exe_imports(&win32_dll);
             return -1;
         }
+        for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+            if(win32_dll.images[i].handle==modules[attached])
+                win32_dll.images[i].initialized=true;
     }
     running=true;
     exit_status=-1;
@@ -518,10 +604,8 @@ void process_handle_interrupt(uint32_t *frame) {
                 win32_files.last_error=win32_vm.last_error;
                 return;
             }
-            case 23: /* LoadLibraryA(const char *name): EBX=guest string */
-                frame[7]=active_win32 ?
-                    win32_dll_load(&win32_dll,frame[4]):0u;
-                if(active_win32)win32_files.last_error=win32_dll.last_error;
+            case 23: /* LoadLibraryA; may arrange ring-3 DllMain */
+                frame[7]=win32_guest_load(frame,false);
                 return;
             case 24: { /* GetProcAddress: EBX=guest pointer to 2 args */
                 uint32_t params=frame[4];
@@ -535,10 +619,8 @@ void process_handle_interrupt(uint32_t *frame) {
                 win32_files.last_error=win32_dll.last_error;
                 return;
             }
-            case 25: /* FreeLibrary(HMODULE module) */
-                frame[7]=active_win32 ?
-                    win32_dll_free(&win32_dll,frame[4]):0u;
-                if(active_win32)win32_files.last_error=win32_dll.last_error;
+            case 25: /* FreeLibrary; final ref may require detach */
+                frame[7]=win32_guest_free(frame);
                 return;
             case 26: /* GetModuleHandleA: EBX=optional module name */
             case 27: { /* GetModuleHandleW: UTF-16LE module name */
@@ -548,17 +630,44 @@ void process_handle_interrupt(uint32_t *frame) {
                 if(active_win32)win32_files.last_error=win32_dll.last_error;
                 return;
             }
-            case 28: /* LoadLibraryW: EBX=UTF-16LE module name */
-                frame[7]=active_win32?
-                    win32_dll_load_w(&win32_dll,frame[4]):0u;
-                if(active_win32)win32_files.last_error=win32_dll.last_error;
+            case 28: /* LoadLibraryW; may arrange ring-3 DllMain */
+                frame[7]=win32_guest_load(frame,true);
                 return;
-            case 29: /* return from restricted DllMain ring-3 trampoline */
+            case 29: /* ring-3 DllMain callback completion */
                 if(active_win32 && dll_entry_active &&
                    frame[10]==WIN32_DLL_INIT_RETURN_EIP) {
                     dll_entry_result=frame[4]!=0u;
                     running=false;
                     process_leave();
+                }
+                if(active_win32 && dynamic_entry.active &&
+                   frame[10]==WIN32_DLL_INIT_RETURN_EIP &&
+                   frame[13]==dynamic_entry.saved_esp) {
+                    uint32_t handle=dynamic_entry.handle;
+                    uint8_t reason=dynamic_entry.reason;
+                    frame[10]=dynamic_entry.saved_eip;
+                    dynamic_entry.active=false;
+                    if(reason==1u) {
+                        if(frame[4]) {
+                            for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+                                if(win32_dll.images[i].state==2u &&
+                                   win32_dll.images[i].handle==handle)
+                                    win32_dll.images[i].initialized=true;
+                            frame[7]=handle;
+                            win32_files.last_error=0u;
+                            kprintf("[win32-dll] dynamic PROCESS_ATTACH completed in ring 3\n");
+                        } else {
+                            (void)win32_dll_free(&win32_dll,handle);
+                            frame[7]=0u;
+                            win32_files.last_error=WIN32_DLL_ERROR_INIT_FAILED;
+                            kprintf("[win32-dll] dynamic PROCESS_ATTACH rejected in ring 3\n");
+                        }
+                    } else {
+                        frame[7]=win32_dll_free(&win32_dll,handle);
+                        win32_files.last_error=win32_dll.last_error;
+                        kprintf("[win32-dll] dynamic PROCESS_DETACH completed in ring 3\n");
+                    }
+                    return;
                 }
                 frame[7]=UINT32_MAX;
                 return;
