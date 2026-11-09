@@ -149,7 +149,9 @@ jobs:
           grep -F "[chrome-win] native PE32 launch attempt rejected" build/windows-probe-serial.log
           grep -F "[win32-file] ring-3 Win32 CreateFile/WriteFile/ReadFile/CloseHandle roundtrip passed" build/windows-probe-serial.log
           grep -F "[win64-install] installed AMD64 application launched; exit 0" build/windows-probe-serial.log
-          if [ "$(grep -Ec '^\[win32-stress\] repeat=[123] Win32 file roundtrip exit=0
+          for repeat in 1 2 3; do
+            grep -F "[win32-stress] repeat=$repeat Win32 file roundtrip exit=0" build/windows-probe-serial.log
+          done
           grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: real file size=" build/windows-probe-serial.log
           grep -F "[winapps] 7-Zip standalone utility: native Win32 attempt returned" build/windows-probe-serial.log
