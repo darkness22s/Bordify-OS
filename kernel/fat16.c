@@ -921,9 +921,16 @@ int fat16_write(uint16_t dir_cluster, const char *name, const void *buffer, uint
         return -1;
     }
     if (!add_entry(dir_cluster, name83, FAT_ATTR_ARCHIVE, 0, 0)) {
+#ifdef BORDIFY_CHROME_PROBE
+        kprintf("[fat16-trace] cannot add %s in cluster=%u\n",
+                name,(unsigned)dir_cluster);
+#endif
         return -1;
     }
     if (!fat16_find(dir_cluster, name, &entry)) {
+#ifdef BORDIFY_CHROME_PROBE
+        kprintf("[fat16-trace] created %s but unable to read its directory entry\n",name);
+#endif
         return -1;
     }
     return write_entry_data(&entry, dir_cluster, buffer, size) ? (int)size : -1;
