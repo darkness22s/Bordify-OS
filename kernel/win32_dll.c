@@ -118,7 +118,8 @@ static bool valid_dll_basename(const char *name) {
     return i!=0u && name[i]=='.' && equals_ci(name+i,".dll");
 }
 static void clear_module(win32_dll_image_t *m) {
-    m->state=0;m->handle=0;m->refs=0;m->dep_refs=0;
+    m->state=0;m->initialized=false;
+    m->handle=0;m->refs=0;m->dep_refs=0;
     m->image_deps=0;m->builtin_deps=0;m->name[0]=0;
     m->info.image_size=0;m->info.guest_base=0;
     m->info.export_rva=0;m->info.export_size=0;
@@ -133,7 +134,7 @@ void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
     dll->pinned[0]=false;dll->pinned[1]=false;
     dll->builtin_dep_refs[0]=0;dll->builtin_dep_refs[1]=0;
     dll->exe_image_deps=0u;dll->exe_builtin_deps=0u;
-    dll->binding_exe=false;
+    dll->binding_exe=false;dll->allow_dynamic_init=false;
     dll->vm=NULLPTR;dll->reader=NULLPTR;dll->reader_context=NULLPTR;
     for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
         clear_module(&dll->images[i]);
@@ -286,8 +287,11 @@ static uint32_t load_name_mode(win32_dll_t *dll,const char *name,bool dependency
         unload_slot(dll,(unsigned)slot);
         return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);
     }
-    /* Do not silently skip initialization on explicit LoadLibrary. */
-    if(m->info.entry_rva && !dll->binding_exe) {
+    /* Only the top-level guest LoadLibrary syscall may request a new
+     * DllMain callback. Refuse uninitialized dependency entrypoints
+     * instead of letting their exports run without PROCESS_ATTACH. */
+    if(m->info.entry_rva && !dll->binding_exe &&
+       (!dll->allow_dynamic_init || dependency)) {
         unload_slot(dll,(unsigned)slot);
         return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);
     }

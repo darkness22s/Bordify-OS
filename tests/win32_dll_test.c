@@ -89,6 +89,11 @@ int main(void) {
     assert(entries[0]==dll.images[1].handle+0x1200u);
     dll.images[1].image_deps=1u;
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    assert(!dll.allow_dynamic_init && !dll.images[0].initialized);
+    dll.allow_dynamic_init=true;
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    assert(!dll.allow_dynamic_init); /* per-process reset */
     puts("Win32 imported-module handles, attach dependency ordering: PASS");
     return 0;
 }

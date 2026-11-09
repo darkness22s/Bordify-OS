@@ -15,6 +15,7 @@
 #define WIN32_DLL_ERROR_BAD_ARGUMENT 87u
 #define WIN32_DLL_ERROR_BAD_EXE_FORMAT 193u
 #define WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY 8u
+#define WIN32_DLL_ERROR_INIT_FAILED 1114u
 /* Reader must reject files exceeding capacity and return their exact length. */
 typedef int (*win32_dll_reader_t)(const char *name,uint8_t *out,
                                    size_t capacity,void *context);
@@ -24,6 +25,7 @@ typedef struct {
     uint16_t refs;            /* explicit LoadLibrary references */
     uint16_t dep_refs;        /* strong references from importing DLLs */
     uint8_t state;            /* 0=empty, 1=loading, 2=ready */
+    bool initialized;         /* guest DllMain PROCESS_ATTACH completed */
     uint8_t image_deps;       /* bit set for each real imported DLL */
     uint8_t builtin_deps;     /* virtual DLL import mask */
     char name[13];
@@ -43,7 +45,8 @@ typedef struct {
     win32_dll_image_t images[WIN32_DLL_MAX_IMAGES];
     uint8_t exe_image_deps;
     uint8_t exe_builtin_deps;
-    bool binding_exe; /* allow entrypoints only in static-import startup */
+    bool binding_exe; /* process-startup graph may contain entrypoints */
+    bool allow_dynamic_init; /* only enabled from guarded guest syscalls */
 } win32_dll_t;
 void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
                     uint32_t base,size_t bytes);
@@ -64,8 +67,9 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
 /* Map up to four bounded PE32 DLLs from whitelisted FAT16 8.3 basenames.
  * Imports can target kernel32, msvcrt, and other supported mapped DLLs.
  * Unresolved imports, missing exports and dependency cycles fail closed.
- * Startup-import DLL entrypoints may execute in ring 3; dynamic-load
- * entrypoints are rejected until the interrupted guest call gate exists. */
+ * Startup and guest-syscall dynamic entrypoints execute only in ring 3.
+ * Loading dependencies with uninitialized DllMain is rejected until
+ * recursive dynamic callback ordering is supported. */
 void win32_dll_set_reader(win32_dll_t *dll,win32_vm_t *vm,
                           win32_dll_reader_t reader,void *context);
 uint32_t win32_dll_load(win32_dll_t *dll,uint32_t guest_name);
