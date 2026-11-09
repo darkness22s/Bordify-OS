@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bordify Linux edition: explicit Wine/Darling/native application dispatcher.
+"""Bordify Linux edition: Wine, native apps, and non-executing DMG importer.
 
 This executes untrusted programs with the user's normal privileges, NOT in a
 security sandbox. Do not use it as a malware-testing environment.
@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-import plistlib
 import shutil
 import struct
 import subprocess
@@ -36,44 +35,16 @@ def read_magic(path: Path, length: int = 8) -> bytes:
         raise LaunchError(str(exc)) from exc
 
 
-def resolve_macos_bundle(bundle: Path) -> Path:
-    """Do not trust CFBundleExecutable as an arbitrary path."""
-    info_path = bundle / "Contents" / "Info.plist"
-    try:
-        with info_path.open("rb") as handle:
-            info = plistlib.load(handle)
-    except (OSError, ValueError, TypeError, plistlib.InvalidFileException) as exc:
-        raise LaunchError("Invalid macOS .app bundle Info.plist") from exc
-    name = info.get("CFBundleExecutable")
-    if not isinstance(name, str) or not name or name in {".", ".."}:
-        raise LaunchError("macOS bundle has no safe CFBundleExecutable")
-    if "/" in name or "\\" in name or "\x00" in name:
-        raise LaunchError("Invalid macOS bundle executable path")
-    contents = (bundle / "Contents" / "MacOS").resolve()
-    binary = (contents / name).resolve()
-    if binary.parent != contents or not binary.is_file():
-        raise LaunchError("macOS bundle executable missing or points outside Contents/MacOS")
-    if read_magic(binary, 4) not in MACHO_MAGIC:
-        raise LaunchError("Bundle executable is not a Mach-O program")
-    return binary
-
-
 def plan_launch(path: Path, *, available=shutil.which) -> tuple[list[str], dict[str, str]]:
     """Purely select a command; never invoke a shell with file data unquoted."""
     path = path.expanduser().resolve(strict=True)
     if not (path.is_file() or path.is_dir()):
         raise LaunchError("Not a regular file or directory")
-    # Flat macOS PKGs are XAR archives; traditional package bundles are dirs.
     if path.suffix.lower() == ".pkg":
-        if path.is_file() and read_magic(path, 4) != b"xar!":
-            raise LaunchError("Invalid macOS .pkg installer signature")
-        if not available("darling"):
-            raise LaunchError("Darling is required for experimental macOS PKG installation")
-        inside = "/Volumes/SystemRoot" + str(path)
-        return ["darling", "shell", "installer", "-pkg", inside, "-target", "/"], {}
+        raise LaunchError("macOS .pkg installers cannot be imported as Bordify apps. Use a .dmg containing a .app bundle.")
     if path.is_dir() and path.suffix.lower() == ".app":
-        path = resolve_macos_bundle(path)
-    elif path.is_dir():
+        raise LaunchError("Direct macOS .app execution is disabled. Import the original DMG as a Bordify .bapp instead.")
+    if path.is_dir():
         if not available("xdg-open"):
             raise LaunchError("xdg-open is required to open directories")
         return ["xdg-open", str(path)], {}
@@ -94,17 +65,11 @@ def plan_launch(path: Path, *, available=shutil.which) -> tuple[list[str], dict[
         prefix = str(Path.home() / ".local" / "share" / "bordify" / "wineprefix")
         return ["wine", "msiexec", "/i", str(path)], {"WINEPREFIX": prefix}
     if ext == ".dmg":
-        if not available("darling"):
-            raise LaunchError("A DMG is an installer image, not an app. Install Darling to try mounting it.")
-        inside = "/Volumes/SystemRoot" + str(path)
-        return ["darling", "shell", "hdiutil", "attach", inside], {}
+        return ["bordify-package", "import", str(path)], {}
+    if ext == ".bapp":
+        return ["bordify-package", "inspect", str(path)], {}
     if magic[:4] in MACHO_MAGIC:
-        if not available("darling"):
-            raise LaunchError("Darling is not installed. macOS application support is experimental.")
-        # Darling shell accepts a program and distinct argv elements; it does
-        # NOT accept one shell command string. Never use host-shell expansion.
-        inside = "/Volumes/SystemRoot" + str(path)
-        return ["darling", "shell", inside], {}
+        raise LaunchError("macOS Mach-O execution is disabled. A .bapp imports metadata and files, not macOS binary code.")
     if magic[:4] == b"\x7fELF" and os.access(path, os.X_OK):
         return [str(path)], {}
     if not available("xdg-open"):
