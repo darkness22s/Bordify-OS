@@ -34,9 +34,13 @@ jobs:
       - name: Execute real Darwin programs through Darling (not a parser fixture)
         run: |
           set -euo pipefail
-          timeout 120s darling shell 'uname -s' | tee build/darling/darling-uname.log
+          # Ubuntu 24.04 AppArmor can block unprivileged user namespaces.
+          # A fresh isolated CI runner is safe to configure for this test.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          timeout --kill-after=5s 60s darling shell 'uname -s' 2>&1 \
+            | tee build/darling/darling-uname.log
           grep -F 'Darwin' build/darling/darling-uname.log
-          timeout 120s darling shell '/usr/bin/true'
+          timeout --kill-after=5s 60s darling shell '/usr/bin/true'
           echo 'Darling actual Darwin binaries: PASS'
       - name: Upload runtime evidence
         if: always()
