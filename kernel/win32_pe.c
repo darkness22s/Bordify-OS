@@ -101,6 +101,10 @@ static uint32_t bridge_address(const uint8_t *image, uint32_t size,
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 14u;
     if (name_in_image(image,size,name_rva,"IsDebuggerPresent"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 15u;
+    if (name_in_image(image,size,name_rva,"VirtualAlloc"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 27u;
+    if (name_in_image(image,size,name_rva,"VirtualFree"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 28u;
     return 0;
 }
 
@@ -427,6 +431,17 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         0x8b,0x54,0x24,0x10,
         0xb8,0,0,0,0,
         0xcd,0x80,0x5b,0xc3
+    };
+    /* All syscall parameters are read from a validated user stack pointer
+     * passed in EBX. The stubs preserve EBX (callee-saved on x86).
+     * VirtualAlloc has four stdcall parameters; VirtualFree has three. */
+    static const uint8_t virtual_alloc[]={
+        0x53,0x8d,0x5c,0x24,0x08,0xb8,21,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x10,0
+    };
+    static const uint8_t virtual_free[]={
+        0x53,0x8d,0x5c,0x24,0x08,0xb8,22,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x0c,0
     };
     static const uint8_t *const code[WIN32_PE_BRIDGE_COUNT]={
         exit_process,get_std_handle,write_file,get_last_error,
