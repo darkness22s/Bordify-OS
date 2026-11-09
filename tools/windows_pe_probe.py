@@ -14,6 +14,10 @@ from pathlib import Path
 BRIDGES = {
     "exitprocess", "getstdhandle", "writefile", "getlasterror",
     "createfilea", "readfile", "closehandle",
+    "getcurrentprocessid", "getcurrentthreadid", "gettickcount",
+    "getmodulehandlea", "getmodulehandlew",
+    "getcommandlinea", "getcommandlinew",
+    "setlasterror", "isdebuggerpresent",
 }
 MAX_IMPORT_DESCRIPTORS = 2048
 MAX_THUNKS_PER_DLL = 8192
