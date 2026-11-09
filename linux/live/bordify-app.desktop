@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Bordify App Launcher
-Comment=Launch Windows applications via Wine or supported macOS apps via Darling
+Comment=Launch Windows apps via Wine and import DMG images as .bapp packages
 Exec=bordify-open %f
 TryExec=bordify-open
 Terminal=false
 NoDisplay=false
 Categories=System;Utility;
-MimeType=application/x-ms-dos-executable;application/x-msdownload;application/x-msi;application/x-apple-diskimage;
+MimeType=application/x-ms-dos-executable;application/x-msdownload;application/x-msi;application/x-apple-diskimage;application/vnd.bordify.bapp;
