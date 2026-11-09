@@ -34,7 +34,7 @@ def run(name, cmd, seconds=45):
         raise SystemExit(returncode)
     return data
 
-uname = run("darling-uname", ["darling", "shell", "uname -s"])
+uname = run("darling-uname", ["darling", "shell", "uname", "-s"])
 if "Darwin" not in uname:
     raise SystemExit("Darling did not actually report Darwin")
 run("darling-true", ["darling", "shell", "/usr/bin/true"])
