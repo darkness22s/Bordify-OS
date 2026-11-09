@@ -29,7 +29,7 @@ test: all $(OUT)/settings-test
 	SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy BORDIFY_SMOKE_FRAMES=4 \
 	  BORDIFY_SMOKE_BMP=$(OUT)/desktop.bmp $(OUT)/bordify-shell
 	$(PYTHON) tests/check_desktop.py $(OUT)/desktop.bmp
-	$(PYTHON) tests/test_windows.py $(OUT)/bordify-shell $(OUT)/desktop.bmp
+	$(PYTHON) tests/check_windows.py $(OUT)/bordify-shell $(OUT)/desktop.bmp
 	$(PYTHON) tests/check_settings.py $(OUT)/settings-test
 
 clean:
