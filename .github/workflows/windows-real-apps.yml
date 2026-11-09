@@ -5,6 +5,12 @@ on:
     paths:
       - ".github/workflows/windows-real-apps.yml"
       - "kernel/chrome_trial.c"
+      - "kernel/process.c"
+      - "kernel/win32_*.c"
+      - "kernel/win32_*.h"
+      - "apps/win32_*.c"
+      - "tests/win32_*.c"
+      - "Makefile"
       - "tools/windows_pe_probe.py"
 permissions:
   contents: read
