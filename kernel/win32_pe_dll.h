@@ -24,7 +24,8 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
 /* name is a NUL-terminated ASCII export, or NULL for an ordinal. */
 /* Validate and bind PE32 import descriptors and IAT entries in an already
  * staged ring-3 image. The callback must return guest-code addresses only.
- * No DllMain/TLS execution; a failed bind must never expose the image. */
+ * This binder never invokes DllMain/TLS itself; the caller must not
+ * expose an image after an unsuccessful import binding. */
 typedef uint32_t (*win32_pe_dll_import_lookup_t)(void *context,
     const char *dll_name,const char *symbol,uint32_t ordinal);
 bool win32_pe_dll_bind_imports(uint8_t *memory,
