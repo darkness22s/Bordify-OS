@@ -71,7 +71,16 @@ jobs:
             '58e09779881cbcc631c49ceb703413e0247a87db01823e597b2a1c40a2afd8f4' \
             /tmp/live-build-trixie.deb | sha256sum -c -
           sudo dpkg -i /tmp/live-build-trixie.deb
-          dpkg-query -W live-build
+          # Debian 13 live-build requires the Debian archive signing keyring.
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb' \
+            --output /tmp/debian-archive-keyring-trixie.deb
+          printf '%s  %s\n' \
+            '9ea7778e443144ca490668737a8ab22dd3e748bb99e805e22ec055abeb3c7fac' \
+            /tmp/debian-archive-keyring-trixie.deb | sha256sum -c -
+          sudo dpkg -i /tmp/debian-archive-keyring-trixie.deb
+          test -s /usr/share/keyrings/debian-archive-keyring.gpg
+          dpkg-query -W live-build debian-archive-keyring
       - name: Assemble Debian Linux hybrid ISO
         run: bash scripts/build-live-iso.sh
       - name: Verify hybrid ISO was produced

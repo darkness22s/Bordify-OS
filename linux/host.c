@@ -51,13 +51,13 @@ int fat16_write_path(const char *path, const void *buf, uint32_t size) {
     char filename[4096], directory[4096];
     if (!settings_path(filename, sizeof(filename))) return -1;
     snprintf(directory, sizeof(directory), "%s", filename);
-    char *slash = strrchr(directory, '/');
+    char *slash = kstrrchr(directory, '/');
     if (!slash) return -1;
     *slash = '\0';
     if (mkdir(directory, 0700) != 0 && errno != EEXIST) {
         char parent[4096];
         snprintf(parent, sizeof(parent), "%s", directory);
-        char *last = strrchr(parent, '/');
+        char *last = kstrrchr(parent, '/');
         if (!last) return -1;
         *last = '\0';
         if (mkdir(parent, 0700) != 0 && errno != EEXIST) return -1;
