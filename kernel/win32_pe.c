@@ -102,8 +102,12 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
         !fits(image_size, import_rva, import_size) ||
         import_size < 40) return false;
 
-    uint32_t descriptors = import_size / 20u;
-    if (descriptors > 16) return false;
+    /* IMAGE_DIRECTORY_ENTRY_IMPORT.Size can encompass the complete
+     * import data blob (descriptors, ILT, IAT and name strings). It is
+     * not a descriptor count. Scan no more than 64 descriptors, requiring
+     * a fully zeroed terminator before that security limit. */
+    uint32_t descriptors=import_size/20u;
+    if (descriptors>64u) descriptors=64u;
     bool terminated = false;
     for (uint32_t i = 0; i < descriptors; ++i) {
         uint32_t desc = import_rva + i * 20u;
