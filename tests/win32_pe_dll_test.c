@@ -177,6 +177,16 @@ int main(int argc,char **argv) {
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
     make_fixture(file);
+    /* Distinct virtual sections must not alias the same raw file bytes. */
+    p16(file+0x86u,2u);
+    p32(file+0x98u+56u,0x3000u);
+    uint8_t *second=file+0x1a0u;
+    memcpy(second,".data",5u);
+    p32(second+8u,0x100u);p32(second+12u,0x2000u);
+    p32(second+16u,0x100u);p32(second+20u,0x400u);
+    assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                               0x40180000u,&info));
+    make_fixture(file);
     p32(file+0x178u+16u,0x1000u); /* section overflows file */
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
