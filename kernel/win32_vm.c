@@ -24,10 +24,9 @@ uint32_t win32_vm_alloc(win32_vm_t *vm,uint32_t addr,uint32_t size,
         return failure(vm,WIN32_VM_ERROR_NOT_ENOUGH_MEMORY);
     uint32_t pages=(size+WIN32_VM_PAGE_SIZE-1u)/WIN32_VM_PAGE_SIZE;
     for(uint32_t first=0;first+pages<=WIN32_VM_PAGE_COUNT;++first) {
-        uint32_t mask=((1u<<pages)-1u)<<first;
-        /* Full arena requests (pages == 32) use a 32-bit all-bits mask,
-         * never shift a uint32_t by 32 (undefined behavior). */
-        if(pages==32u)mask=0xffffffffu;
+        /* Full-arena requests avoid shifting uint32_t by 32. */
+        uint32_t mask=pages==32u ? 0xffffffffu :
+                      ((1u<<pages)-1u)<<first;
         if((vm->used_pages&mask)!=0u)continue;
         vm->used_pages|=mask;
         vm->runs[first]=(uint8_t)pages;
