@@ -14,7 +14,7 @@ typedef struct {
     int y1;
 } gfx_clip_t;
 
-void gfx_init(uint32_t framebuffer, uint32_t pitch, int width, int height);
+void gfx_init(uintptr_t framebuffer, uint32_t pitch, int width, int height);
 uint32_t *gfx_buffer(void);
 int gfx_width(void);
 int gfx_height(void);

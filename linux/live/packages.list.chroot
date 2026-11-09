@@ -1,0 +1,24 @@
+# Debian 13 "trixie" live rootfs, bootable Linux with Bordify's desktop.
+linux-image-amd64
+live-boot
+live-config
+live-config-systemd
+systemd-sysv
+lightdm
+lightdm-gtk-greeter
+openbox
+xserver-xorg
+xinit
+libsdl2-2.0-0
+pcmanfm
+firefox-esr
+xdg-utils
+zenity
+python3
+ca-certificates
+fonts-dejavu-core
+wine
+wine64
+fonts-wine
+sudo
+dbus-x11

@@ -1,0 +1,150 @@
+name: Linux Bordify edition (desktop, Wine and boot image)
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/linux-bordify-desktop-compat-2026-11-09
+
+permissions:
+  contents: read
+
+# Abort redundant heavy ISO runs from superseded commits, not current checks.
+concurrency:
+  group: linux-edition-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux renderer and Windows test toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libsdl2-dev python3-pil fonts-dejavu-core \
+            gcc-mingw-w64-x86-64 wine wine64 xvfb xauth
+      - name: Unit-test Windows/macOS/native app dispatch
+        run: python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
+      - name: Compile preserved Bordify desktop and verify frame pixels
+        run: make -C linux test
+      - name: Execute a native Linux ELF through Bordify's file dispatcher
+        run: |
+          cc -O2 -Wall -Wextra -Werror linux/tests/native_hello.c \
+            -o build/linux/native-hello
+          BORDIFY_TEST_NO_DIALOG=1 \
+            python3 linux/bordify_open.py build/linux/native-hello \
+            > build/linux/native-dispatch.log
+          grep -F 'BORDIFY_LINUX_NATIVE_ELF_OK' build/linux/native-dispatch.log
+      - name: Compile independently authored Windows PE64 using MinGW
+        run: |
+          mkdir -p build/linux
+          x86_64-w64-mingw32-gcc -O2 linux/tests/wine_hello.c \
+            -o build/linux/wine-hello.exe
+          file build/linux/wine-hello.exe
+      - name: Execute real Windows PE64 under Wine
+        run: |
+          set -euo pipefail
+          timeout 180s xvfb-run -a env WINEDEBUG=-all \
+            WINEPREFIX="$RUNNER_TEMP/bordify-wine" \
+            wine build/linux/wine-hello.exe > build/linux/wine.log 2>&1
+          cat build/linux/wine.log
+          grep -F 'BORDIFY_LINUX_WINE_PE64_OK' build/linux/wine.log
+      - name: Execute Windows PE through Bordify's actual file dispatcher
+        run: |
+          mkdir -p "$RUNNER_TEMP/bordify-home"
+          timeout 180s xvfb-run -a env WINEDEBUG=-all BORDIFY_TEST_NO_DIALOG=1 \
+            HOME="$RUNNER_TEMP/bordify-home" \
+            python3 linux/bordify_open.py build/linux/wine-hello.exe \
+            > build/linux/wine-dispatch.log 2>&1
+          cat build/linux/wine-dispatch.log
+          grep -F 'BORDIFY_LINUX_WINE_PE64_OK' build/linux/wine-dispatch.log
+      - name: Exercise genuine third-party 7-Zip x64 installer and archive roundtrip in Wine
+        run: bash linux/tests/test_wine_7zip.sh
+      - name: Upload Linux desktop verification screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-Linux-desktop-test
+          path: build/linux/desktop.bmp
+          retention-days: 7
+
+  linux-live-iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    needs: linux-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian live-image builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libsdl2-dev python3-pil fonts-dejavu-core \
+            live-build debootstrap squashfs-tools xorriso \
+            grub-pc-bin grub-efi-amd64-bin mtools rsync \
+            isolinux syslinux-common syslinux-utils grub-common dosfstools qemu-system-x86
+      - name: Use Debian 13's live-build rather than Ubuntu's older incompatible scripts
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://deb.debian.org/debian/pool/main/l/live-build/live-build_20250505+deb13u1_all.deb' \
+            --output /tmp/live-build-trixie.deb
+          printf '%s  %s\n' \
+            '58e09779881cbcc631c49ceb703413e0247a87db01823e597b2a1c40a2afd8f4' \
+            /tmp/live-build-trixie.deb | sha256sum -c -
+          sudo dpkg -i /tmp/live-build-trixie.deb
+          # Debian 13 live-build requires the Debian archive signing keyring.
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb' \
+            --output /tmp/debian-archive-keyring-trixie.deb
+          printf '%s  %s\n' \
+            '9ea7778e443144ca490668737a8ab22dd3e748bb99e805e22ec055abeb3c7fac' \
+            /tmp/debian-archive-keyring-trixie.deb | sha256sum -c -
+          sudo dpkg -i /tmp/debian-archive-keyring-trixie.deb
+          test -s /usr/share/keyrings/debian-archive-keyring.gpg
+          dpkg-query -W live-build debian-archive-keyring
+      - name: Assemble Debian Linux hybrid ISO
+        run: bash scripts/build-live-iso.sh
+      - name: Verify hybrid ISO was produced
+        run: |
+          set -euo pipefail
+          test -s dist/Bordify-OS-Linux-amd64.iso
+          file dist/Bordify-OS-Linux-amd64.iso
+          sha256sum -c dist/Bordify-OS-Linux-amd64.iso.sha256
+          xorriso -indev dist/Bordify-OS-Linux-amd64.iso -ls /live \
+            | tee build/linux/iso-files.log
+          grep -E 'vmlinuz' build/linux/iso-files.log
+          grep -E 'initrd' build/linux/iso-files.log
+          grep -F 'filesystem.squashfs' build/linux/iso-files.log
+      - name: Boot the ISO in QEMU and verify the real desktop plus app windows
+        run: |
+          python3 linux/tests/boot_iso.py dist/Bordify-OS-Linux-amd64.iso
+      - name: Upload QEMU boot evidence (including on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-Linux-boot-evidence
+          path: |
+            build/linux/qemu-*.ppm
+            build/linux/qemu-*.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve assembled ISO when QEMU validation fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-Linux-ISO-UNVERIFIED
+          path: dist/Bordify-OS-Linux-amd64.iso
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload bootable Linux image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-OS-Linux-amd64
+          path: |
+            dist/Bordify-OS-Linux-amd64.iso
+            dist/Bordify-OS-Linux-amd64.iso.sha256
+          if-no-files-found: error
+          retention-days: 14

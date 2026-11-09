@@ -1,9 +1,19 @@
 # Bordify OS
 
-Bordify is a small, real 32-bit x86 operating system. It boots through
-Multiboot2 and GRUB into its own kernel, draws a windowed desktop on a
-linear framebuffer, and reads and writes files on a real FAT16 partition.
-There is no Linux, browser host or web-app wrapper underneath.
+Bordify has two boot paths:
+
+- **Linux edition (new, on the Linux migration branch):** Debian Linux
+  hybrid live ISO, booting into Bordify's original pixel-drawn desktop via
+  SDL2 and X11. Wine handles supported Windows applications, and the optional
+  Darling runtime can attempt supported macOS Mach-O programs. Read
+  [Linux edition setup and limitations](linux/README.md).
+- **Legacy Bordify:** the original real 32-bit x86 kernel, booting through
+  Multiboot2 and GRUB with a framebuffer, ATA and FAT16 filesystem.
+  The legacy kernel is *not* Linux and remains independently buildable.
+
+The original desktop appearance is shared between the two editions. The
+Linux desktop retains Bordify's existing C renderer, fonts, icons, dock,
+window decorations, themes and app-shortcut arrangement.
 
 ![build](https://github.com/darkness22s/Bordify-OS/actions/workflows/build.yml/badge.svg)
 
@@ -170,7 +180,15 @@ mount or install real macOS DMGs, execute general Apple Silicon applications,
 or implement full Darwin/Cocoa frameworks. Untrusted applications must not be launched by this
 early-stage kernel. [Details and compatibility gates](docs/application-compatibility.md).
 
-## Download and run
+## Linux edition: build and run
+
+The new Linux boot path lives in `linux/`, with a Debian Live hybrid ISO
+builder at `scripts/build-live-iso.sh`. See [Linux edition](linux/README.md)
+for packages, building, QEMU, native Linux/Wine/Darling app dispatch and the
+compatibility limitations. The original kernel image and its filesystem
+are unchanged.
+
+## Legacy Bordify: download and run
 
 Prebuilt images are attached to the [latest release](https://github.com/darkness22s/Bordify-OS/releases/latest):
 

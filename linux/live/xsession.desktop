@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Bordify OS
+Comment=Bordify's original desktop on Linux
+Exec=/usr/local/bin/bordify-session
+Type=Application
+DesktopNames=Bordify
