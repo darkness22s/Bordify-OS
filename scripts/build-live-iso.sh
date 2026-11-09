@@ -8,9 +8,12 @@ WORK="$ROOT/build/linux/live-build"
 mkdir -p "$WORK" "$ROOT/dist"
 cd "$WORK"
 # Work directory is isolated from the legacy kernel image builder.
+# The Linux kernel is already explicitly listed as linux-image-amd64.
+# Older Ubuntu live-build tries the retired Contents-amd64.gz index if asked
+# to discover kernel flavours; disable its duplicate auto-selection step.
 lb config --mode debian --distribution trixie --architectures amd64 \
   --binary-images iso-hybrid --archive-areas "main contrib non-free-firmware" \
-  --debian-installer none --security false --bootappend-live "boot=live components" \
+  --debian-installer none --security false --linux-packages none --bootappend-live "boot=live components" \
   --iso-application "Bordify OS Linux Edition" \
   --iso-publisher "Bordify OS"
 mkdir -p config/archives config/package-lists \
