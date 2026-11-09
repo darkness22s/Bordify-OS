@@ -218,6 +218,9 @@ bool win32_pe_dll_bind_imports(uint8_t *m,
     uint32_t size=info->image_size,offset=info->import_rva;
     if(!lookup || info->import_size<20u ||
        !fits(size,offset,info->import_size))return false;
+    /* Bind atomically: a missing dependency must never leave a partly
+     * rewritten IAT that could be mistaken for a successfully bound DLL. */
+    uint32_t patch_rvas[256],patch_values[256];
     uint32_t descriptors=0u,functions=0u;
     for(size_t cursor=offset;
         fits((size_t)offset+info->import_size,cursor,20u);
@@ -226,8 +229,11 @@ bool win32_pe_dll_bind_imports(uint8_t *m,
         uint32_t oft=rd32(d),stamp=rd32(d+4u);
         uint32_t chain=rd32(d+8u),name_rva=rd32(d+12u);
         uint32_t iat=rd32(d+16u);
-        if(!oft && !stamp && !chain && !name_rva && !iat)
+        if(!oft && !stamp && !chain && !name_rva && !iat) {
+            for(uint32_t i=0;i<functions;++i)
+                wr32(m+patch_rvas[i],patch_values[i]);
             return true; /* mandatory all-zero terminator */
+        }
         if(++descriptors>16u || !name_rva || !iat ||
            !fits(size,iat,4u) || (oft && !fits(size,oft,4u)))
             return false;
@@ -256,7 +262,8 @@ bool win32_pe_dll_bind_imports(uint8_t *m,
             }
             uint32_t address=lookup(context,dll_name,symbol,ordinal);
             if(!address)return false;
-            wr32(m+(size_t)dest,address);
+            patch_rvas[functions]=(uint32_t)dest;
+            patch_values[functions]=address;
             ++functions;
         }
         if(!terminated)return false;

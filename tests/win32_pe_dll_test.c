@@ -140,6 +140,19 @@ int main(int argc,char **argv) {
            memory[0x1551u]==0u &&
            memory[0x1552u]==7u &&
            memory[0x1553u]==0x40u);
+    /* A valid first import followed by an unresolved second import must
+     * leave the original IAT completely untouched. */
+    make_fixture(file);
+    set_imports(file);
+    p32(file+0x744u,0x15c0u); /* second INT entry */
+    p32(file+0x754u,0x15c0u); /* second IAT entry */
+    memcpy(file+0x7c2u,"MissingApi",11u);
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    uint8_t old_iat[8];
+    memcpy(old_iat,memory+0x1550u,sizeof(old_iat));
+    assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    assert(memcmp(old_iat,memory+0x1550u,sizeof(old_iat))==0);
     make_fixture(file);
     set_imports(file);
     p32(file+0x740u,0x80000007u);
