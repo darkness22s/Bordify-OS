@@ -19,6 +19,10 @@ BRIDGES = {
     "getcommandlinea", "getcommandlinew",
     "setlasterror", "isdebuggerpresent",
 }
+MSVCRT_BRIDGES = {
+    "strlen", "memcpy", "memset", "memcmp", "strcmp", "strncmp",
+    "malloc", "free", "calloc", "memmove", "realloc",
+}
 MAX_IMPORT_DESCRIPTORS = 2048
 MAX_THUNKS_PER_DLL = 8192
 
@@ -127,7 +131,8 @@ def probe(path, max_bytes=1<<30):
     unknown=[]
     for dll, names in dlls.items():
         for name in names:
-            if dll!="kernel32.dll" or name.lower() not in BRIDGES:
+            if not ((dll=="kernel32.dll" and name.lower() in BRIDGES) or
+                    (dll=="msvcrt.dll" and name.lower() in MSVCRT_BRIDGES)):
                 unknown.append(f"{dll}!{name}")
     sha=hashlib.sha256(content).hexdigest()
     return {
