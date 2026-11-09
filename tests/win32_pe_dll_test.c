@@ -62,6 +62,18 @@ int main(int argc,char **argv) {
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
     make_fixture(file);
+    /* Empty compiler-style import descriptor is allowed, real import isn't. */
+    p32(file+0x98u+104u,0x1150u);
+    p32(file+0x98u+108u,20u);
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    make_fixture(file);
+    p32(file+0x98u+104u,0x1150u);
+    p32(file+0x98u+108u,20u);
+    file[0x350u]=1u; /* real DLL import descriptor must fail closed */
+    assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                               0x40180000u,&info));
+    make_fixture(file);
     p16(file+0x96u,2u); /* not DLL */
     assert(!win32_pe_dll_image_size(file,sizeof(file)));
     make_fixture(file);

@@ -112,9 +112,15 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
     uint32_t exp=rd32(file+opt+96u),exp_size=rd32(file+opt+100u);
     uint32_t reloc=rd32(file+opt+96u+5u*8u);
     uint32_t reloc_size=rd32(file+opt+100u+5u*8u);
-    /* Strictly fail closed on imports, TLS, or delayed loading. */
-    if(rd32(file+opt+104u) || rd32(file+opt+108u) ||
-       rd32(file+opt+96u+9u*8u) ||
+    /* MinGW may supply an import directory containing ONLY its zeroed
+     * 20-byte terminator. That is still import-free. Require exactly this
+     * layout; any actual import descriptors remain unsupported. */
+    uint32_t imports=rd32(file+opt+104u);
+    uint32_t imports_size=rd32(file+opt+108u);
+    if((imports || imports_size) &&
+       (!imports || imports_size!=20u ||
+        !fits(size,imports,20u)))return false;
+    if(rd32(file+opt+96u+9u*8u) ||
        rd32(file+opt+96u+13u*8u) ||
        !exp || exp_size<40u || !fits(size,exp,exp_size))
         return false;
@@ -140,6 +146,10 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
         uint32_t v=rd32(s+12u),raw=rd32(s+16u),offset=rd32(s+20u);
         for(uint32_t j=0;j<raw;++j)dst[v+j]=file[offset+j];
     }
+    if(imports) {
+        for(unsigned i=0;i<20u;++i)
+            if(dst[imports+i]!=0u)return false; /* real dependencies */
+    }
     if(!rebase(dst,size,rd32(file+opt+28u),base,reloc,reloc_size))
         return false;
     const uint8_t *exports=dst+exp;
@@ -149,7 +159,7 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
     uint32_t names=rd32(exports+32u);
     uint32_t ordinals=rd32(exports+36u);
     if(!num_functions || num_functions>DLL_MAX_EXPORTS ||
-       num_names>num_functions ||
+       num_names>DLL_MAX_EXPORTS ||
        !fits(size,funcs,(size_t)num_functions*4u) ||
        !fits(size,names,(size_t)num_names*4u) ||
        !fits(size,ordinals,(size_t)num_names*2u))return false;
@@ -177,7 +187,7 @@ uint32_t win32_pe_dll_resolve(const uint8_t *image,
     uint32_t base_ord=rd32(e+16u),nfunc=rd32(e+20u);
     uint32_t nnames=rd32(e+24u),funcs=rd32(e+28u);
     uint32_t names=rd32(e+32u),ords=rd32(e+36u);
-    if(nfunc==0 || nfunc>DLL_MAX_EXPORTS || nnames>nfunc ||
+    if(nfunc==0 || nfunc>DLL_MAX_EXPORTS || nnames>DLL_MAX_EXPORTS ||
        !fits(info->image_size,funcs,(size_t)nfunc*4u) ||
        !fits(info->image_size,names,(size_t)nnames*4u) ||
        !fits(info->image_size,ords,(size_t)nnames*2u))return 0u;
