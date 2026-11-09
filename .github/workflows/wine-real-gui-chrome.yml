@@ -1,0 +1,103 @@
+name: Windows GUI and genuine Chrome installer acceptance
+on:
+  push:
+    branches: [test/wine-gui-chrome-acceptance-2026-11-09]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wine-notepad-gui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Wine and X11 inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine64 xvfb xauth x11-utils
+      - name: Start Windows Notepad and verify an actual X11 GUI window
+        run: |
+          mkdir -p build/linux/windows-gui
+          export WINEPREFIX="$RUNNER_TEMP/bordify-notepad"
+          export WINEDEBUG=-all
+          xvfb-run -a bash -euo pipefail -c '
+            wine notepad.exe > build/linux/windows-gui/notepad.log 2>&1 &
+            pid=$!
+            sleep 20
+            xwininfo -root -tree | tee build/linux/windows-gui/x11-windows.log
+            grep -i "Notepad" build/linux/windows-gui/x11-windows.log
+            kill "$pid" || true
+            wineserver -k || true
+          '
+          echo "Real Wine Windows Notepad GUI window: PASS"
+      - name: Upload Notepad GUI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wine-GUI-window-evidence
+          path: build/linux/windows-gui/*.log
+          retention-days: 7
+  chrome-real-installer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Wine64 and Wine32 on isolated test runner
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine64 wine32:i386 xvfb xauth
+      - name: Download real official Windows Chrome offline installer
+        run: |
+          mkdir -p build/linux/chrome
+          cd build/linux/chrome
+          curl --fail --location --retry 3 --connect-timeout 20 \
+            https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe \
+            -o ChromeStandaloneSetup64.exe
+          sha256sum ChromeStandaloneSetup64.exe | tee chrome-sha256.log
+          file ChromeStandaloneSetup64.exe | tee chrome-file.log
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+          b=Path("ChromeStandaloneSetup64.exe").read_bytes()
+          assert b[:2]==b"MZ" and len(b)>50_000_000
+          pe=struct.unpack_from("<I",b,60)[0]
+          assert b[pe:pe+4]==b"PE\0\0"
+          print("Google Chrome real executable downloaded:",len(b),"bytes")
+          PY
+      - name: Execute genuine Chrome installer under Wine and verify actual installed browser
+        run: |
+          set -uo pipefail
+          export WINEPREFIX="$RUNNER_TEMP/bordify-chrome-prefix"
+          export WINEDEBUG=-all
+          mkdir -p "$WINEPREFIX"
+          cd build/linux/chrome
+          timeout --signal=TERM --kill-after=10s 180s xvfb-run -a \
+            wine ChromeStandaloneSetup64.exe /silent /install >chrome-wine-install.log 2>&1
+          code=$?
+          echo "Chrome installer Wine exit: $code" | tee chrome-outcome.log
+          find "$WINEPREFIX" -iname chrome.exe -type f \
+            | tee chrome-installed-paths.log
+          if [ "$code" -ne 0 ] || [ ! -s chrome-installed-paths.log ]; then
+             echo "Chrome real Windows installer did not yield a working Chrome binary" >&2
+             tail -n 100 chrome-wine-install.log >&2
+             exit 1
+          fi
+          echo "Chrome EXE installed under Wine, probing native binary startup"
+          executable="$(head -n 1 chrome-installed-paths.log)"
+          timeout --signal=TERM --kill-after=5s 45s xvfb-run -a \
+            wine "$executable" --version >chrome-version.log 2>&1
+          code=$?
+          cat chrome-version.log
+          test "$code" -eq 0
+          grep -Ei 'Google Chrome|Chromium' chrome-version.log
+          echo "Real Windows Chrome code executed under Wine: PASS"
+      - name: Upload only Chrome diagnostic text, never copyrighted binaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Chrome-Wine-acceptance-diagnostics
+          path: |
+            build/linux/chrome/*.log
+          if-no-files-found: warn
+          retention-days: 7
