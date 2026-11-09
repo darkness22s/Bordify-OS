@@ -72,6 +72,23 @@ int main(void) {
     win32_dll_pin_imports(&dll,0u);
     assert(!win32_dll_get_module(&dll,BASE+0x2000,false));
     assert(dll.last_error==WIN32_DLL_ERROR_MOD_NOT_FOUND);
-    puts("Win32 imported-module pinning, Unicode names and dynamic lookup: PASS");
+    /* Dependency-safe process attach order and cyclic graph rejection. */
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    dll.images[0].state=2u;dll.images[0].handle=BASE+0x190000u;
+    dll.images[0].info.image_size=0x2000u;
+    dll.images[0].info.entry_rva=0x1000u;
+    dll.images[0].image_deps=2u;
+    dll.images[1].state=2u;dll.images[1].handle=BASE+0x192000u;
+    dll.images[1].info.image_size=0x2000u;
+    dll.images[1].info.entry_rva=0x1200u;
+    uint32_t modules[WIN32_DLL_MAX_IMAGES],entries[WIN32_DLL_MAX_IMAGES];
+    uint32_t number=0u;
+    assert(win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==2u && modules[0]==dll.images[1].handle &&
+           modules[1]==dll.images[0].handle);
+    assert(entries[0]==dll.images[1].handle+0x1200u);
+    dll.images[1].image_deps=1u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    puts("Win32 imported-module handles, attach dependency ordering: PASS");
     return 0;
 }

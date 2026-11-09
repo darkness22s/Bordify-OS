@@ -5,7 +5,7 @@
 #include "win32_vm.h"
 
 /* Virtual kernel32/msvcrt handles and bounded PE32 file-backed DLLs.
- * No full NT loader, TLS/DllMain, GUI, general DLL search or OS thread ABI.
+ * No full NT loader, TLS, GUI, general DLL search or OS thread ABI.
  */
 #define WIN32_DLL_KERNEL32_HANDLE 0x70000001u
 #define WIN32_DLL_MSVCRT_HANDLE 0x70000002u
@@ -43,6 +43,7 @@ typedef struct {
     win32_dll_image_t images[WIN32_DLL_MAX_IMAGES];
     uint8_t exe_image_deps;
     uint8_t exe_builtin_deps;
+    bool binding_exe; /* allow entrypoints only in static-import startup */
 } win32_dll_t;
 void win32_dll_init(win32_dll_t *dll,const uint8_t *guest,
                     uint32_t base,size_t bytes);
@@ -54,10 +55,17 @@ bool win32_dll_bind_exe_imports(win32_dll_t *dll,uint32_t image_size,
                                 uint32_t import_rva,uint32_t import_size,
                                 uint32_t *bound_count);
 void win32_dll_release_exe_imports(win32_dll_t *dll);
+/* Order real DLL entrypoints after their dependencies. The returned
+ * addresses are untrusted GUEST EIPs, never kernel call targets. */
+bool win32_dll_attach_plan(const win32_dll_t *dll,
+                           uint32_t handles[WIN32_DLL_MAX_IMAGES],
+                           uint32_t entries[WIN32_DLL_MAX_IMAGES],
+                           uint32_t *count);
 /* Map up to four bounded PE32 DLLs from whitelisted FAT16 8.3 basenames.
  * Imports can target kernel32, msvcrt, and other supported mapped DLLs.
  * Unresolved imports, missing exports and dependency cycles fail closed.
- * Exported DLL code executes only in ring 3; no DllMain is called. */
+ * Startup-import DLL entrypoints may execute in ring 3; dynamic-load
+ * entrypoints are rejected until the interrupted guest call gate exists. */
 void win32_dll_set_reader(win32_dll_t *dll,win32_vm_t *vm,
                           win32_dll_reader_t reader,void *context);
 uint32_t win32_dll_load(win32_dll_t *dll,uint32_t guest_name);
