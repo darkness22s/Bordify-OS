@@ -45,6 +45,15 @@ jobs:
             wine build/linux/wine-hello.exe > build/linux/wine.log 2>&1
           cat build/linux/wine.log
           grep -F 'BORDIFY_LINUX_WINE_PE64_OK' build/linux/wine.log
+      - name: Execute Windows PE through Bordify's actual file dispatcher
+        run: |
+          mkdir -p "$RUNNER_TEMP/bordify-home"
+          timeout 180s xvfb-run -a env WINEDEBUG=-all BORDIFY_TEST_NO_DIALOG=1 \
+            HOME="$RUNNER_TEMP/bordify-home" \
+            python3 linux/bordify_open.py build/linux/wine-hello.exe \
+            > build/linux/wine-dispatch.log 2>&1
+          cat build/linux/wine-dispatch.log
+          grep -F 'BORDIFY_LINUX_WINE_PE64_OK' build/linux/wine-dispatch.log
       - name: Exercise genuine third-party 7-Zip x64 installer and archive roundtrip in Wine
         run: bash linux/tests/test_wine_7zip.sh
       - name: Upload Linux desktop verification screenshot
