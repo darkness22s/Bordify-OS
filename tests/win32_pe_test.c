@@ -33,6 +33,30 @@ int main(void) {
     assert(win32_pe_install_bridges(memory, 2 * 1024 * 1024));
     assert(memory[WIN32_PE_RUNTIME_OFFSET] == 0x8b);
     assert(memory[WIN32_PE_RUNTIME_OFFSET + 2 * 64] == 0x53);
+    /* Generic PE/COFF loader: zero OriginalFirstThunk legally means read
+     * the import-name thunks from FirstThunk before filling the IAT. */
+    p32(image+0x400u,0u);
+    assert(win32_pe_stage(image,n,memory,2u*1024u*1024u,&result));
+    assert(result.imported_functions==3u && result.reject_reason==WIN32_PE_OK);
+    p32(image+0x400u,0x1260u);
+    assert(win32_pe_stage(image,n,memory,2u*1024u*1024u,&result));
+
+    /* Per-process strings live above the image in ring-3 mapped RAM. */
+    assert(win32_pe_install_bridges(memory,2u*1024u*1024u));
+    assert(win32_pe_set_command_line(memory,2u*1024u*1024u,"WINREAL.EXE"));
+    assert(strcmp((const char *)(memory+WIN32_PE_CMDLINE_A_OFFSET),
+                  "\"C:\\BORDIFY\\APPS\\WINREAL.EXE\"")==0);
+    assert(memory[WIN32_PE_CMDLINE_W_OFFSET]==(uint8_t)'"' &&
+           memory[WIN32_PE_CMDLINE_W_OFFSET+1u]==0);
+    assert(!win32_pe_set_command_line(memory,2u*1024u*1024u,"Bad Name.exe"));
+    assert(memory[WIN32_PE_RUNTIME_OFFSET+10u*64u+9u]==0xb8);
+    assert(u32(memory+WIN32_PE_RUNTIME_OFFSET+10u*64u+10u)==
+           WIN32_PE_USER_BASE);
+    assert(u32(memory+WIN32_PE_RUNTIME_OFFSET+12u*64u+1u)==
+           WIN32_PE_USER_BASE+WIN32_PE_CMDLINE_A_OFFSET);
+    assert(strcmp(win32_pe_reason_name(WIN32_PE_UNSUPPORTED_API),
+                  "unsupported imported API")==0);
+
 
     /* Section table at 0x178..0x1a0 must fit in SizeOfHeaders.
      * Input bytes existing beyond that declared boundary are not enough. */
