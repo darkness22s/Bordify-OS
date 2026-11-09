@@ -31,6 +31,14 @@ jobs:
         run: python3 -m unittest discover -s linux/tests -p 'test_*.py' -v
       - name: Compile preserved Bordify desktop and verify frame pixels
         run: make -C linux test
+      - name: Execute a native Linux ELF through Bordify's file dispatcher
+        run: |
+          cc -O2 -Wall -Wextra -Werror linux/tests/native_hello.c \
+            -o build/linux/native-hello
+          BORDIFY_TEST_NO_DIALOG=1 \
+            python3 linux/bordify_open.py build/linux/native-hello \
+            > build/linux/native-dispatch.log
+          grep -F 'BORDIFY_LINUX_NATIVE_ELF_OK' build/linux/native-dispatch.log
       - name: Compile independently authored Windows PE64 using MinGW
         run: |
           mkdir -p build/linux
@@ -105,8 +113,11 @@ jobs:
           test -s dist/Bordify-OS-Linux-amd64.iso
           file dist/Bordify-OS-Linux-amd64.iso
           sha256sum -c dist/Bordify-OS-Linux-amd64.iso.sha256
-          xorriso -indev dist/Bordify-OS-Linux-amd64.iso \
-            -find /live -type f -print
+          xorriso -indev dist/Bordify-OS-Linux-amd64.iso -ls /live \
+            | tee build/linux/iso-files.log
+          grep -E 'vmlinuz' build/linux/iso-files.log
+          grep -E 'initrd' build/linux/iso-files.log
+          grep -F 'filesystem.squashfs' build/linux/iso-files.log
       - name: Boot the ISO in QEMU and verify the real desktop plus app windows
         run: |
           python3 linux/tests/boot_iso.py dist/Bordify-OS-Linux-amd64.iso
@@ -120,6 +131,14 @@ jobs:
             build/linux/qemu-*.log
           if-no-files-found: warn
           retention-days: 14
+      - name: Preserve assembled ISO when QEMU validation fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bordify-Linux-ISO-UNVERIFIED
+          path: dist/Bordify-OS-Linux-amd64.iso
+          if-no-files-found: warn
+          retention-days: 7
       - name: Upload bootable Linux image
         uses: actions/upload-artifact@v4
         with:
