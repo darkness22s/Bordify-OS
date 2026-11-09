@@ -24,6 +24,7 @@ typedef struct {
     uint32_t base;
     size_t bytes;
     uint32_t used_pages; /* bit i represents allocated 4-KiB page */
+    uint32_t module_pages; /* pages reserved for loaded DLL code */
     uint8_t runs[WIN32_VM_PAGE_COUNT]; /* first page stores length in pages */
     uint32_t last_error;
 } win32_vm_t;
@@ -34,4 +35,8 @@ uint32_t win32_vm_alloc(win32_vm_t *vm,uint32_t addr,uint32_t size,
 /* VirtualFree(base, 0, MEM_RELEASE). Returns BOOL. */
 uint32_t win32_vm_free(win32_vm_t *vm,uint32_t addr,uint32_t size,
                        uint32_t flags);
+/* A DLL-owned run cannot be released by guest VirtualFree; only the DLL
+ * manager can release it when its final LoadLibrary ref disappears. */
+uint32_t win32_vm_alloc_module(win32_vm_t *vm,uint32_t size);
+uint32_t win32_vm_free_module(win32_vm_t *vm,uint32_t addr);
 #endif

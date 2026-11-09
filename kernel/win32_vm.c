@@ -6,7 +6,7 @@
 void win32_vm_init(win32_vm_t *vm,uint8_t *guest,uint32_t base,size_t bytes) {
     if (!vm) return;
     vm->guest=guest;vm->base=base;vm->bytes=bytes;
-    vm->used_pages=0;vm->last_error=0;
+    vm->used_pages=0;vm->module_pages=0;vm->last_error=0;
     for(unsigned i=0;i<WIN32_VM_PAGE_COUNT;++i)vm->runs[i]=0;
 }
 static uint32_t failure(win32_vm_t *vm,uint32_t code) {
@@ -52,6 +52,8 @@ uint32_t win32_vm_free(win32_vm_t *vm,uint32_t addr,uint32_t size,
         return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
     uint32_t mask=pages==32u ? 0xffffffffu :
                   ((1u<<pages)-1u)<<first;
+    if(vm->module_pages&mask)
+        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
     vm->runs[first]=0;
     vm->used_pages&=~mask;
     uint32_t off=WIN32_VM_START+first*WIN32_VM_PAGE_SIZE;
@@ -59,4 +61,35 @@ uint32_t win32_vm_free(win32_vm_t *vm,uint32_t addr,uint32_t size,
         vm->guest[off+i]=0;
     vm->last_error=0;
     return 1u;
+}
+
+/* Allocate inside the existing ring-3 page table, and mark the run as
+ * module-owned. This is NOT a general memory permission/W^X manager. */
+uint32_t win32_vm_alloc_module(win32_vm_t *vm,uint32_t size) {
+    uint32_t addr=win32_vm_alloc(vm,0u,size,
+                      WIN32_VM_MEM_COMMIT|WIN32_VM_MEM_RESERVE,
+                      WIN32_VM_PAGE_READWRITE);
+    if(!addr)return 0u;
+    uint32_t first=(addr-vm->base-WIN32_VM_START)/WIN32_VM_PAGE_SIZE;
+    uint32_t count=vm->runs[first];
+    uint32_t mask=count==32u?0xffffffffu:((1u<<count)-1u)<<first;
+    vm->module_pages|=mask;
+    return addr;
+}
+uint32_t win32_vm_free_module(win32_vm_t *vm,uint32_t addr) {
+    if(!vm || !vm->guest || addr<vm->base+WIN32_VM_START ||
+       addr>=vm->base+WIN32_VM_END ||
+       (addr-vm->base-WIN32_VM_START)%WIN32_VM_PAGE_SIZE)
+        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
+    uint32_t first=(addr-vm->base-WIN32_VM_START)/WIN32_VM_PAGE_SIZE;
+    uint32_t count=vm->runs[first];
+    if(!count || first+count>WIN32_VM_PAGE_COUNT)
+        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
+    uint32_t mask=count==32u?0xffffffffu:((1u<<count)-1u)<<first;
+    if((vm->module_pages&mask)!=mask)
+        return failure(vm,WIN32_VM_ERROR_INVALID_PARAMETER);
+    vm->module_pages&=~mask;
+    uint32_t ok=win32_vm_free(vm,addr,0u,WIN32_VM_MEM_RELEASE);
+    if(!ok)vm->module_pages|=mask;
+    return ok;
 }

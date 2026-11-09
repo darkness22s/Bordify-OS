@@ -34,6 +34,15 @@ all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/win
 
 # A genuinely C-compiled Windows PE32 program with normal kernel32 DLL
 # imports and a preferred image base that requires PE32 HIGHLOW rebasing.
+# A genuine MinGW-built, CRT-free, import-free PE32 DLL with one exported
+# stdcall function and a real HIGHLOW data relocation. It is used only in
+# opt-in Windows test images, not required by the default OS image build.
+$(BUILD)/apps/bordll.dll: apps/win32_testdll.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,0 -Wl,--image-base,0x10000000 \
+	  -Wl,--enable-reloc-section -o $@ $<
+
 $(BUILD)/apps/winreal.exe: apps/win32_realc.c
 	@mkdir -p $(BUILD)/apps
 	$(MINGW_CC) -Os -std=gnu11 -fno-stack-protector -nostdlib \
@@ -171,9 +180,9 @@ $(BUILD)/tests/win32_pe_dll_test: tests/win32_pe_dll_test.c kernel/win32_pe_dll.
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_pe_dll_test.c kernel/win32_pe_dll.c -o $@
 
-$(BUILD)/tests/win32_dll_test: tests/win32_dll_test.c kernel/win32_dll.c kernel/win32_dll.h kernel/win32_pe.h
+$(BUILD)/tests/win32_dll_test: tests/win32_dll_test.c kernel/win32_dll.c kernel/win32_dll.h kernel/win32_pe.h kernel/win32_pe_dll.c kernel/win32_vm.c
 	@mkdir -p $(BUILD)/tests
-	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_dll_test.c kernel/win32_dll.c -o $@
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_dll_test.c kernel/win32_dll.c kernel/win32_pe_dll.c kernel/win32_vm.c -o $@
 
 $(BUILD)/tests/win32_vm_test: tests/win32_vm_test.c kernel/win32_vm.c kernel/win32_vm.h
 	@mkdir -p $(BUILD)/tests

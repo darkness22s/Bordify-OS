@@ -40,6 +40,14 @@ int main(void) {
     win32_vm_init(&vm,guest,BASE,BYTES);
     assert(vm.used_pages==0u); /* resets across processes */
     assert(win32_vm_alloc(&vm,0,4096,0x3000u,0x04u)==a);
+    /* DLL-owned pages are never released through guest VirtualFree. */
+    win32_vm_init(&vm,guest,BASE,BYTES);
+    uint32_t module=win32_vm_alloc_module(&vm,8192u);
+    assert(module && vm.module_pages!=0u);
+    assert(!win32_vm_free(&vm,module,0u,WIN32_VM_MEM_RELEASE));
+    assert(win32_vm_free_module(&vm,module));
+    assert(vm.module_pages==0u);
+    assert(!win32_vm_free_module(&vm,module));
     puts("Win32 VirtualAlloc/VirtualFree isolated guest page arena: PASS");
     return 0;
 }

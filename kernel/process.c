@@ -88,6 +88,21 @@ static bool win32_save_file(const uint8_t *data,size_t count,void *context) {
 #endif
     return stored==(int)count && found && entry.size==(uint32_t)count;
 }
+/* External DLL loads are restricted to APPS/<8.3>.DLL with bounded
+ * file size, no absolute paths, no DOS device names and no search path. */
+static int win32_read_dll(const char *name,uint8_t *out,
+                          size_t capacity,void *context) {
+    (void)context;
+    fat_entry_t folder,entry;
+    if(!name || !out || !fat16_mounted() ||
+       !fat16_find(0,"APPS",&folder) ||
+       !(folder.attr&FAT_ATTR_DIRECTORY) ||
+       !fat16_find(folder.cluster,name,&entry) ||
+       (entry.attr&FAT_ATTR_DIRECTORY) ||
+       entry.size<512u || entry.size>capacity)return -1;
+    int got=fat16_read(folder.cluster,name,out,entry.size);
+    return got==(int)entry.size?got:-1;
+}
 static uint32_t *page_directory;
 static uint32_t *user_page_table;
 static uint8_t *user_memory;
@@ -312,6 +327,7 @@ int process_run_win32_pe(const char *directory, const char *filename) {
     win32_dll_init(&win32_dll,(const uint8_t *)(uintptr_t)PROCESS_USER_BASE,
                    PROCESS_USER_BASE,PROCESS_USER_BYTES);
     win32_dll_pin_imports(&win32_dll,image.imported_module_mask);
+    win32_dll_set_reader(&win32_dll,&win32_vm,win32_read_dll,NULLPTR);
     active_win32=true;
     running = true;
     exit_status = -1;

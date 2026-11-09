@@ -28,7 +28,10 @@ jobs:
         run: |
           make test
           make -j"$(nproc)" CHROME_PROBE=1
-          make build/apps/winreal.exe build/apps/wincrt.exe
+          make build/apps/winreal.exe build/apps/wincrt.exe build/apps/bordll.dll
+          # Verify the actual independently built PE32 DLL image on the host,
+          # before attempting native exported code inside the QEMU guest.
+          ./build/tests/win32_pe_dll_test build/apps/bordll.dll
           sudo bash scripts/build-image.sh
       - name: Download genuine Google Chrome installers and 7-Zip utility
         run: |
@@ -123,6 +126,8 @@ jobs:
             build/apps/winreal.exe "::APPS/WINREAL.EXE"
           mcopy -i "build/windows-probe.img@@1048576" \
             build/apps/wincrt.exe "::APPS/WINCRT.EXE"
+          mcopy -i "build/windows-probe.img@@1048576" \
+            build/apps/bordll.dll "::APPS/BORDLL.DLL"
           if [ -f build/windows/ChromeSetup.exe ]; then
             mcopy -i "build/windows-probe.img@@1048576" \
               build/windows/ChromeSetup.exe "::APPS/WEBSET.EXE"
@@ -158,6 +163,7 @@ jobs:
           for repeat in 1 2 3; do
             grep -F "[win32-stress] repeat=$repeat Win32 file roundtrip exit=0" build/windows-probe-serial.log
           done
+          grep -F "BORDIFY MAPPED PE32 DLL: native MinGW export executed in ring 3" build/windows-probe-serial.log
           grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-probe-serial.log
           grep -F "BORDIFY REAL MSVCRT PE32: two DLL imports, strings and heap verified" build/windows-probe-serial.log
           grep -F "[winapps] independent two-DLL MinGW MSVCRT program: native Win32 attempt returned 0" build/windows-probe-serial.log
@@ -194,6 +200,7 @@ jobs:
           for repeat in 1 2 3; do
             grep -F "[win32-stress] repeat=$repeat Win32 file roundtrip exit=0" build/windows-second-serial.log
           done
+          grep -F "BORDIFY MAPPED PE32 DLL: native MinGW export executed in ring 3" build/windows-second-serial.log
           grep -F "[winapps] independent MinGW PE32 program: native Win32 attempt returned 0" build/windows-second-serial.log
           grep -F "[winapps] independent two-DLL MinGW MSVCRT program: native Win32 attempt returned 0" build/windows-second-serial.log
           grep -F "[kernel] starting desktop" build/windows-second-serial.log
