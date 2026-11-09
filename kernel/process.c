@@ -56,6 +56,11 @@ static win32_files_t win32_files;
 static win32_crt_t win32_crt;
 static win32_vm_t win32_vm;
 static win32_dll_t win32_dll;
+/* Fixed guest-only DllMain call stub, outside Win32 bridges and strings. */
+#define WIN32_DLL_INIT_STUB (PROCESS_USER_BASE+WIN32_PE_RUNTIME_OFFSET+8192u)
+#define WIN32_DLL_INIT_RETURN_EIP (WIN32_DLL_INIT_STUB+25u)
+static bool dll_entry_active;
+static bool dll_entry_result;
 /* The Windows guest never supplies an arbitrary FAT16 destination. */
 static int win32_load_file(uint8_t *out,size_t capacity,void *context) {
     (void)context;
@@ -280,6 +285,41 @@ int process_run_elf32(const char *directory, const char *filename) {
  * explicitly allowed kernel32.dll import surface. No GUI/registry/MSI,
  * no PE64, and no arbitrary application or installer compatibility.
  */
+/* DllMain(HINSTANCE,DWORD,LPVOID) uses stdcall and returns BOOL.
+ * Prepare its arguments in the user stack and enter CPL3. Never directly
+ * call a guest entrypoint from the supervisor. Syscall 29 returns here. */
+static bool win32_call_dll_entry(uint32_t module,uint32_t entry,
+                                uint8_t reason) {
+    if(!active_win32 || !user_range(entry,1u) ||
+       !user_range(WIN32_DLL_INIT_STUB,27u) ||
+       reason>1u || !module)return false;
+    uint8_t *code=(uint8_t *)(uintptr_t)WIN32_DLL_INIT_STUB;
+    static const uint8_t thunk[27]={
+        0x6a,0x00,                  /* push 0: reserved */
+        0x6a,0x01,                  /* push reason */
+        0x68,0,0,0,0,              /* push HINSTANCE */
+        0xb8,0,0,0,0,              /* mov eax,DllMain guest EIP */
+        0xff,0xd0,                 /* call eax */
+        0x89,0xc3,                 /* mov ebx,eax (BOOL) */
+        0xb8,29,0,0,0,             /* special syscall return */
+        0xcd,0x80,                 /* int 0x80 */
+        0x0f,0x0b                  /* ud2: impossible fallthrough */
+    };
+    kmemcpy(code,thunk,sizeof(thunk));
+    code[3]=reason;
+    for(unsigned i=0;i<4u;++i) {
+        code[5u+i]=(uint8_t)(module>>(i*8u));
+        code[10u+i]=(uint8_t)(entry>>(i*8u));
+    }
+    dll_entry_active=true;
+    dll_entry_result=false;
+    running=true;
+    process_enter(WIN32_DLL_INIT_STUB,
+                  PROCESS_USER_BASE+PROCESS_USER_BYTES-16u);
+    running=false;
+    dll_entry_active=false;
+    return dll_entry_result;
+}
 int process_run_win32_pe(const char *directory, const char *filename) {
     if (!ready || running || !fat16_mounted()) return -1;
 
@@ -335,15 +375,43 @@ int process_run_win32_pe(const char *directory, const char *filename) {
         return -1;
     }
     active_win32=true;
-    running = true;
-    exit_status = -1;
-    kprintf("[win32] launched PE32 console in ring 3 with %u kernel32 imports\n",
-            image.imported_functions);
-    process_enter(image.entry, PROCESS_USER_BASE + PROCESS_USER_BYTES - 16);
-    running = false;
+    exit_status=-1;
+    uint32_t modules[WIN32_DLL_MAX_IMAGES]={0u};
+    uint32_t entries[WIN32_DLL_MAX_IMAGES]={0u};
+    uint32_t init_count=0u,attached=0u;
+    if(!win32_dll_attach_plan(&win32_dll,modules,entries,&init_count)) {
+        kprintf("[win32] DLL attach order invalid\n");
+        active_win32=false;
+        win32_dll_release_exe_imports(&win32_dll);
+        return -1;
+    }
+    for(;attached<init_count;++attached) {
+        if(!win32_call_dll_entry(modules[attached],entries[attached],1u)) {
+            kprintf("[win32] DLL_PROCESS_ATTACH failed for 0x%08x\n",
+                    modules[attached]);
+            while(attached) {
+                --attached;
+                (void)win32_call_dll_entry(modules[attached],entries[attached],0u);
+            }
+            active_win32=false;
+            win32_dll_release_exe_imports(&win32_dll);
+            return -1;
+        }
+    }
+    running=true;
+    exit_status=-1;
+    kprintf("[win32] launched PE32 console in ring 3 with %u imports, %u DLL attach calls\n",
+            image.imported_functions,attached);
+    process_enter(image.entry,PROCESS_USER_BASE+PROCESS_USER_BYTES-16u);
+    running=false;
+    /* DLL_PROCESS_DETACH in reverse dependency order, before memory release. */
+    while(attached) {
+        --attached;
+        (void)win32_call_dll_entry(modules[attached],entries[attached],0u);
+    }
     active_win32=false;
     win32_dll_release_exe_imports(&win32_dll);
-    kprintf("[win32] PE32 process exited %d\n", exit_status);
+    kprintf("[win32] PE32 process exited %d\n",exit_status);
     return exit_status;
 }
 
@@ -484,6 +552,15 @@ void process_handle_interrupt(uint32_t *frame) {
                 frame[7]=active_win32?
                     win32_dll_load_w(&win32_dll,frame[4]):0u;
                 if(active_win32)win32_files.last_error=win32_dll.last_error;
+                return;
+            case 29: /* return from restricted DllMain ring-3 trampoline */
+                if(active_win32 && dll_entry_active &&
+                   frame[10]==WIN32_DLL_INIT_RETURN_EIP) {
+                    dll_entry_result=frame[4]!=0u;
+                    running=false;
+                    process_leave();
+                }
+                frame[7]=UINT32_MAX;
                 return;
             case 2: /* exit: EBX = signed status */
                 exit_status = (int)frame[4];

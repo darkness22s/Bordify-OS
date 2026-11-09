@@ -51,12 +51,19 @@ $(BUILD)/apps/chain.dll: apps/win32_chaindll.c $(BUILD)/apps/bordll.dll
 	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
 	  -L$(BUILD)/apps -Wl,--out-implib,$(BUILD)/apps/libchain.a -o $@ $< -lbordll
 
-$(BUILD)/apps/winstat.exe: apps/win32_static_realc.c $(BUILD)/apps/chain.dll
+$(BUILD)/apps/init.dll: apps/win32_initdll.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,_DllMain@12 -Wl,--image-base,0x12000000 \
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
+	  -Wl,--out-implib,$(BUILD)/apps/libinit.a -o $@ $<
+
+$(BUILD)/apps/winstat.exe: apps/win32_static_realc.c $(BUILD)/apps/chain.dll $(BUILD)/apps/init.dll
 	@mkdir -p $(BUILD)/apps
 	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib \
 	  -Wl,--entry,_mainCRTStartup -Wl,--subsystem,console \
 	  -Wl,--image-base,0x00400000 -Wl,--enable-reloc-section \
-	  -L$(BUILD)/apps -o $@ $< -lchain -lkernel32
+	  -L$(BUILD)/apps -o $@ $< -lchain -linit -lkernel32
 
 $(BUILD)/apps/winreal.exe: apps/win32_realc.c
 	@mkdir -p $(BUILD)/apps
