@@ -55,7 +55,19 @@ static bool name_in_image(const uint8_t *image, uint32_t image_size,
                     allowed < 48 ? allowed : 48);
 }
 static uint32_t bridge_address(const uint8_t *image, uint32_t size,
-                               uint32_t name_rva) {
+                               uint32_t name_rva,uint32_t dll) {
+    uint32_t base=WIN32_PE_USER_BASE+WIN32_PE_RUNTIME_OFFSET;
+    if(dll==2u) {
+        static const char *const crt_exports[]={
+            "strlen","memcpy","memset","memcmp","strcmp","strncmp",
+            "malloc","free","calloc","memmove","realloc"
+        };
+        for(uint32_t i=0;i<11u;++i)
+            if(name_in_image(image,size,name_rva,crt_exports[i]))
+                return base+(16u+i)*BRIDGE_SLOT;
+        return 0;
+    }
+    if(dll!=1u) return 0;
     if (name_in_image(image, size, name_rva, "ExitProcess"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET;
     if (name_in_image(image, size, name_rva, "GetStdHandle"))
@@ -118,7 +130,10 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
             terminated = true;
             break;
         }
-        if (!name_in_image(memory,image_size,name,"kernel32.dll")) {
+        uint32_t dll=0;
+        if(name_in_image(memory,image_size,name,"kernel32.dll")) dll=1;
+        else if(name_in_image(memory,image_size,name,"msvcrt.dll")) dll=2;
+        else {
             *reason=WIN32_PE_UNSUPPORTED_DLL;
             return false;
         }
@@ -137,7 +152,7 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
             if (value == 0) { found_end = true; break; }
             if (value & 0x80000000u) return false; /* ordinal imports omitted */
             if (!fits(image_size, value, 3)) return false;
-            uint32_t address = bridge_address(memory, image_size, value + 2u);
+            uint32_t address=bridge_address(memory,image_size,value+2u,dll);
             if (!address) {
                 *reason=WIN32_PE_UNSUPPORTED_API;
                 return false;
@@ -398,12 +413,29 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         0xc2,0x04,0               /* ret 4 */
     };
     static const uint8_t false_value[]={0x31,0xc0,0xc3};
+    /* Pure C cdecl uses caller stack cleanup. Preserve EBX and forward
+     * up to 3 arguments into the guest-only int 0x80 syscall envelope.
+     * The service number is patched once per 64-byte stub at offset 13.
+     *
+     * push ebx
+     * mov ebx,[esp+8]; mov ecx,[esp+12]; mov edx,[esp+16]
+     * mov eax,service; int 0x80; pop ebx; ret
+     */
+    static const uint8_t crt_bridge[]={
+        0x53,0x8b,0x5c,0x24,0x08,
+        0x8b,0x4c,0x24,0x0c,
+        0x8b,0x54,0x24,0x10,
+        0xb8,0,0,0,0,
+        0xcd,0x80,0x5b,0xc3
+    };
     static const uint8_t *const code[WIN32_PE_BRIDGE_COUNT]={
         exit_process,get_std_handle,write_file,get_last_error,
         create_file,read_file,close_handle,
         constant_one,constant_one,get_tick_count,
         get_module_handle,get_module_handle,
-        get_command_line,get_command_line,set_last_error,false_value
+        get_command_line,get_command_line,set_last_error,false_value,
+        crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
+        crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge
     };
     static const size_t lengths[WIN32_PE_BRIDGE_COUNT]={
         sizeof(exit_process),sizeof(get_std_handle),
@@ -412,7 +444,11 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         sizeof(constant_one),sizeof(constant_one),sizeof(get_tick_count),
         sizeof(get_module_handle),sizeof(get_module_handle),
         sizeof(get_command_line),sizeof(get_command_line),
-        sizeof(set_last_error),sizeof(false_value)
+        sizeof(set_last_error),sizeof(false_value),
+        sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(crt_bridge),sizeof(crt_bridge)
     };
     if (!fits(size,WIN32_PE_CMDLINE_W_OFFSET,WIN32_PE_CMDLINE_LIMIT*2u))
         return false;
@@ -421,6 +457,7 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         uint8_t *dest=memory+WIN32_PE_RUNTIME_OFFSET+i*BRIDGE_SLOT;
         clear_bytes(dest,BRIDGE_SLOT);
         copy_bytes(dest,code[i],lengths[i]);
+        if(i>=16u) dest[14u]=(uint8_t)(10u+i-16u);
     }
     uint8_t *stubs=memory+WIN32_PE_RUNTIME_OFFSET;
     wr32(stubs+10u*BRIDGE_SLOT+10u,WIN32_PE_USER_BASE);
