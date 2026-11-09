@@ -9,6 +9,7 @@
 #include "win32_files.h"
 #include "win32_crt.h"
 #include "win32_vm.h"
+#include "win32_dll.h"
 #include "pit.h"
 
 #define PAGE_PRESENT 0x001u
@@ -54,6 +55,7 @@ static bool active_win32;
 static win32_files_t win32_files;
 static win32_crt_t win32_crt;
 static win32_vm_t win32_vm;
+static win32_dll_t win32_dll;
 /* The Windows guest never supplies an arbitrary FAT16 destination. */
 static int win32_load_file(uint8_t *out,size_t capacity,void *context) {
     (void)context;
@@ -307,6 +309,8 @@ int process_run_win32_pe(const char *directory, const char *filename) {
                    PROCESS_USER_BASE,PROCESS_USER_BYTES);
     win32_vm_init(&win32_vm,(uint8_t *)(uintptr_t)PROCESS_USER_BASE,
                   PROCESS_USER_BASE,PROCESS_USER_BYTES);
+    win32_dll_init(&win32_dll,(const uint8_t *)(uintptr_t)PROCESS_USER_BASE,
+                   PROCESS_USER_BASE,PROCESS_USER_BYTES);
     active_win32=true;
     running = true;
     exit_status = -1;
@@ -422,6 +426,28 @@ void process_handle_interrupt(uint32_t *frame) {
                 win32_files.last_error=win32_vm.last_error;
                 return;
             }
+            case 23: /* LoadLibraryA(const char *name): EBX=guest string */
+                frame[7]=active_win32 ?
+                    win32_dll_load(&win32_dll,frame[4]):0u;
+                if(active_win32)win32_files.last_error=win32_dll.last_error;
+                return;
+            case 24: { /* GetProcAddress: EBX=guest pointer to 2 args */
+                uint32_t params=frame[4];
+                if(!active_win32 || !user_range(params,8u)) {
+                    frame[7]=0u;
+                    if(active_win32)win32_files.last_error=87u;
+                    return;
+                }
+                const uint32_t *p=(const uint32_t *)(uintptr_t)params;
+                frame[7]=win32_dll_symbol(&win32_dll,p[0],p[1]);
+                win32_files.last_error=win32_dll.last_error;
+                return;
+            }
+            case 25: /* FreeLibrary(HMODULE module) */
+                frame[7]=active_win32 ?
+                    win32_dll_free(&win32_dll,frame[4]):0u;
+                if(active_win32)win32_files.last_error=win32_dll.last_error;
+                return;
             case 2: /* exit: EBX = signed status */
                 exit_status = (int)frame[4];
                 running = false;
