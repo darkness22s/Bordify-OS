@@ -63,7 +63,9 @@ int main(void) {
     assert(call(11,BASE+BYTES-4u,BASE+0x2200,8)==UINT32_MAX);
     assert(call(12,BASE+BYTES-2u,1,8)==UINT32_MAX);
     assert(call(13,BASE+BYTES-2u,BASE+0x2200,8)==UINT32_MAX);
+    memory[0x2200]='X'; /* force equality before crossing the first buffer bound */
     assert(call(14,BASE+BYTES-1u,BASE+0x2200,0)==UINT32_MAX);
+    memory[0x2200]='z';
     assert(call(20,BASE+0x1200,512,0)==UINT32_MAX);
     assert(rt.last_error==87u);
     assert(call(99,0,0,0)==UINT32_MAX);
