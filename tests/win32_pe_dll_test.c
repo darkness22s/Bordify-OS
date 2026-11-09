@@ -40,6 +40,26 @@ static void make_fixture(uint8_t *f) {
     p32(f+0x500u,0x1000u);p32(f+0x504u,12u);
     p16(f+0x508u,0x3204u);p16(f+0x50au,0u);
 }
+/* Build a well-formed single-DLL import descriptor with both IAT and INT.
+ * The synthetic export fixture stays unchanged; only import parsing varies. */
+static void set_imports(uint8_t *f) {
+    p32(f+0x98u+104u,0x1500u);p32(f+0x98u+108u,40u);
+    p32(f+0x700u,0x1540u); /* OriginalFirstThunk */
+    p32(f+0x70cu,0x1580u); /* DLL basename */
+    p32(f+0x710u,0x1550u);/* FirstThunk */
+    p32(f+0x740u,0x15a0u);
+    p32(f+0x750u,0x15a0u);
+    memcpy(f+0x780u,"kernel32.dll",13u);
+    memcpy(f+0x7a2u,"GetTickCount",13u);
+}
+static uint32_t import_lookup(void *context,const char *dll,
+                              const char *symbol,uint32_t ordinal) {
+    unsigned *calls=context; ++*calls;
+    if(strcmp(dll,"kernel32.dll")!=0)return 0u;
+    if(symbol && strcmp(symbol,"GetTickCount")==0)return 0x40070000u;
+    if(!symbol && ordinal==7u)return 0x40070004u;
+    return 0u;
+}
 int main(int argc,char **argv) {
     uint8_t file[0x800u],memory[0x2000u];
     win32_pe_dll_info_t info;
@@ -58,7 +78,7 @@ int main(int argc,char **argv) {
                               0x40180000u,&info));
     assert(!win32_pe_dll_resolve(memory,&info,"BordifyAdd",0u));
     make_fixture(file);
-    p32(file+0x98u+104u,0x1150u); /* requires unimplemented imports */
+    p32(file+0x98u+104u,0x1150u); /* malformed nonzero RVA, zero size */
     assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
                                0x40180000u,&info));
     make_fixture(file);
@@ -70,9 +90,46 @@ int main(int argc,char **argv) {
     make_fixture(file);
     p32(file+0x98u+104u,0x1150u);
     p32(file+0x98u+108u,20u);
-    file[0x350u]=1u; /* real DLL import descriptor must fail closed */
-    assert(!win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
-                               0x40180000u,&info));
+    file[0x350u]=1u; /* unrecognized descriptor still needs binding */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    assert(!win32_pe_dll_bind_imports(memory,&info,NULL,NULL));
+    make_fixture(file);
+    set_imports(file);
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    unsigned calls=0;
+    assert(win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    assert(calls==1u);
+    assert(memory[0x1550u]==0u &&
+           memory[0x1551u]==0u &&
+           memory[0x1552u]==7u &&
+           memory[0x1553u]==0x40u);
+    make_fixture(file);
+    set_imports(file);
+    p32(file+0x740u,0x80000007u);
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    assert(win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    assert(memory[0x1550u]==4u); /* ordinal resolves to 0x40070004 */
+    make_fixture(file);
+    set_imports(file);
+    file[0x780u]='Z'; /* unknown module name */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    make_fixture(file);
+    set_imports(file);
+    p32(file+0x740u,0x7fffffffu); /* wildly out-of-bounds hint/name */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    make_fixture(file);
+    set_imports(file);
+    memset(file+0x714u,0xff,20u); /* missing terminator */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
     make_fixture(file);
     p16(file+0x96u,2u); /* not DLL */
     assert(!win32_pe_dll_image_size(file,sizeof(file)));

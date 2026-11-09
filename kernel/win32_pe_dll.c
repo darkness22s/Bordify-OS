@@ -100,7 +100,8 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
                         uint8_t *dst,size_t capacity,
                         uint32_t base,win32_pe_dll_info_t *out) {
     if(out){out->image_size=0;out->guest_base=0;
-            out->export_rva=0;out->export_size=0;}
+            out->export_rva=0;out->export_size=0;
+            out->import_rva=0;out->import_size=0;}
     size_t nt,opt;uint16_t count;
     if(!out || !dst || (base&4095u) ||
        !header(file,file_size,&nt,&opt,&count))return false;
@@ -112,14 +113,13 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
     uint32_t exp=rd32(file+opt+96u),exp_size=rd32(file+opt+100u);
     uint32_t reloc=rd32(file+opt+96u+5u*8u);
     uint32_t reloc_size=rd32(file+opt+100u+5u*8u);
-    /* MinGW may supply an import directory containing ONLY its zeroed
-     * 20-byte terminator. That is still import-free. Require exactly this
-     * layout; any actual import descriptors remain unsupported. */
+    /* A DLL's image can be mapped before import binding. No caller may
+     * invoke exports until win32_pe_dll_bind_imports succeeds. */
     uint32_t imports=rd32(file+opt+104u);
     uint32_t imports_size=rd32(file+opt+108u);
     if((imports || imports_size) &&
-       (!imports || imports_size!=20u ||
-        !fits(size,imports,20u)))return false;
+       (!imports || imports_size<20u ||
+        !fits(size,imports,imports_size)))return false;
     if(rd32(file+opt+96u+9u*8u) ||
        rd32(file+opt+96u+13u*8u) ||
        !exp || exp_size<40u || !fits(size,exp,exp_size))
@@ -145,10 +145,6 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
         const uint8_t *s=file+section_table+i*40u;
         uint32_t v=rd32(s+12u),raw=rd32(s+16u),offset=rd32(s+20u);
         for(uint32_t j=0;j<raw;++j)dst[v+j]=file[offset+j];
-    }
-    if(imports) {
-        for(unsigned i=0;i<20u;++i)
-            if(dst[imports+i]!=0u)return false; /* real dependencies */
     }
     if(!rebase(dst,size,rd32(file+opt+28u),base,reloc,reloc_size))
         return false;
@@ -176,7 +172,77 @@ bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
     out->guest_base=base;
     out->export_rva=exp;
     out->export_size=exp_size;
+    out->import_rva=imports;
+    out->import_size=imports_size;
     return true;
+}
+/* Read PE ASCII names with a strict bound. Even imported names are copied
+ * into kernel-owned, bounded buffers before passing to the resolver. */
+static bool read_import_string(const uint8_t *m,uint32_t bytes,uint32_t rva,
+                               char out[65]) {
+    if(!rva || rva>=bytes)return false;
+    for(uint32_t i=0;i<64u;++i) {
+        if(!fits(bytes,(size_t)rva+i,1u))return false;
+        uint8_t c=m[rva+i];
+        if(c==0u){out[i]=0;return i!=0u;}
+        if(c<33u || c>126u)return false;
+        out[i]=(char)c;
+    }
+    out[64]=0;
+    return false;
+}
+bool win32_pe_dll_bind_imports(uint8_t *m,
+    const win32_pe_dll_info_t *info,
+    win32_pe_dll_import_lookup_t lookup,void *context) {
+    if(!m || !info || !info->image_size)return false;
+    if(!info->import_rva && !info->import_size)return true;
+    uint32_t size=info->image_size,offset=info->import_rva;
+    if(!lookup || info->import_size<20u ||
+       !fits(size,offset,info->import_size))return false;
+    uint32_t descriptors=0u,functions=0u;
+    for(size_t cursor=offset;
+        fits((size_t)offset+info->import_size,cursor,20u);
+        cursor+=20u) {
+        const uint8_t *d=m+cursor;
+        uint32_t oft=rd32(d),stamp=rd32(d+4u);
+        uint32_t chain=rd32(d+8u),name_rva=rd32(d+12u);
+        uint32_t iat=rd32(d+16u);
+        if(!oft && !stamp && !chain && !name_rva && !iat)
+            return true; /* mandatory all-zero terminator */
+        if(++descriptors>16u || !name_rva || !iat ||
+           !fits(size,iat,4u) || (oft && !fits(size,oft,4u)))
+            return false;
+        char dll_name[65];
+        if(!read_import_string(m,size,name_rva,dll_name))return false;
+        uint32_t lookup_rva=oft?oft:iat;
+        bool terminated=false;
+        for(uint32_t i=0u;i<256u && functions<256u;++i) {
+            uint64_t thunk=(uint64_t)lookup_rva+(uint64_t)i*4u;
+            uint64_t dest=(uint64_t)iat+(uint64_t)i*4u;
+            if(thunk>size || dest>size ||
+               !fits(size,(size_t)thunk,4u) ||
+               !fits(size,(size_t)dest,4u))return false;
+            uint32_t raw=rd32(m+(size_t)thunk);
+            if(!raw){terminated=true;break;}
+            char proc[65];
+            const char *symbol=NULLPTR;
+            uint32_t ordinal=0u;
+            if(raw&0x80000000u) {
+                if(raw&0x7fff0000u)return false;
+                ordinal=raw&0xffffu;
+            } else {
+                if(raw>size || !fits(size,raw,3u) ||
+                   !read_import_string(m,size,raw+2u,proc))return false;
+                symbol=proc;
+            }
+            uint32_t address=lookup(context,dll_name,symbol,ordinal);
+            if(!address)return false;
+            wr32(m+(size_t)dest,address);
+            ++functions;
+        }
+        if(!terminated)return false;
+    }
+    return false; /* descriptor array has no terminating entry */
 }
 uint32_t win32_pe_dll_resolve(const uint8_t *image,
                              const win32_pe_dll_info_t *info,
