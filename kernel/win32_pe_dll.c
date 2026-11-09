@@ -91,8 +91,11 @@ static bool executable_rva(const uint8_t *m,uint32_t size,uint32_t rva) {
         const uint8_t *s=m+sections+i*40u;
         uint32_t start=rd32(s+12u),n=rd32(s+8u),raw=rd32(s+16u);
         if(raw>n)n=raw;
+        /* Executable entrypoints and exports must be backed by file bytes.
+         * A virtual-only section tail is zero-filled, not executable code. */
         if((rd32(s+36u)&0x20000000u) &&
-           rva>=start && rva-start<n && rva<size)return true;
+           rva>=start && rva-start<raw && rva-start<n && rva<size)
+            return true;
     }
     return false;
 }
