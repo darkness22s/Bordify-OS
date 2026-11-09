@@ -46,13 +46,12 @@ class DispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(launcher.LaunchError, "Wine"):
             launcher.plan_launch(path, available=lambda _: None)
 
-    def test_macho_with_spaces_and_quotes(self):
+    def test_macho_binaries_are_not_executed(self):
         path = self.make_file("my ' app.macho", b"\xcf\xfa\xed\xfe" + bytes(8))
-        cmd, _ = launcher.plan_launch(path, available=self.available)
-        self.assertEqual(cmd[0:2], ["darling", "shell"])
-        self.assertEqual(cmd, ["darling", "shell", "/Volumes/SystemRoot" + str(path)])
+        with self.assertRaisesRegex(launcher.LaunchError, "execution is disabled"):
+            launcher.plan_launch(path, available=self.available)
 
-    def test_bundle_validates_plist(self):
+    def test_app_bundle_is_not_executed(self):
         app = self.base / "Example.app"
         folder = app / "Contents" / "MacOS"
         folder.mkdir(parents=True)
@@ -60,9 +59,8 @@ class DispatchTests(unittest.TestCase):
             plistlib.dumps({"CFBundleExecutable": "hello"}))
         binary = folder / "hello"
         binary.write_bytes(b"\xcf\xfa\xed\xfe" + bytes(8))
-        cmd, _ = launcher.plan_launch(app, available=self.available)
-        self.assertEqual(cmd[:2], ["darling", "shell"])
-        self.assertIn("hello", cmd[-1])
+        with self.assertRaisesRegex(launcher.LaunchError, "Direct macOS"):
+            launcher.plan_launch(app, available=self.available)
 
     def test_bundle_path_traversal_rejected(self):
         app = self.base / "Example.app"
@@ -72,30 +70,32 @@ class DispatchTests(unittest.TestCase):
         with self.assertRaises(launcher.LaunchError):
             launcher.plan_launch(app, available=self.available)
 
-    def test_darling_pkg_installer(self):
+    def test_pkg_is_not_executed(self):
         path = self.make_file("Installer.pkg", b"xar!" + bytes(16))
-        cmd, env = launcher.plan_launch(path, available=self.available)
-        self.assertEqual(cmd[0:2], ["darling", "shell"])
-        self.assertEqual(cmd, ["darling", "shell", "installer", "-pkg",
-                               "/Volumes/SystemRoot" + str(path), "-target", "/"])
-        self.assertEqual(env, {})
+        with self.assertRaisesRegex(launcher.LaunchError, "cannot be imported"):
+            launcher.plan_launch(path, available=self.available)
 
     def test_bad_pkg_rejected(self):
         path = self.make_file("Installer.pkg", b"not an installer")
         with self.assertRaises(launcher.LaunchError):
             launcher.plan_launch(path, available=self.available)
 
-    def test_dmg_is_mount_not_execute(self):
+    def test_dmg_is_imported_and_never_mounted_with_darling(self):
         path = self.make_file("Installer.dmg", b"sample image")
-        cmd, _ = launcher.plan_launch(path, available=self.available)
-        self.assertEqual(cmd, ["darling", "shell", "hdiutil", "attach",
-                               "/Volumes/SystemRoot" + str(path)])
-
-    def test_macho_metacharacters_are_single_argument(self):
-        path = self.make_file("a $(echo BAD); test.macho", b"\xcf\xfa\xed\xfe" + bytes(8))
-        cmd, env = launcher.plan_launch(path, available=self.available)
-        self.assertEqual(cmd, ["darling", "shell", "/Volumes/SystemRoot" + str(path)])
+        cmd, env = launcher.plan_launch(path, available=lambda _: None)
+        self.assertEqual(cmd, ["bordify-package", "import", str(path)])
         self.assertEqual(env, {})
+
+    def test_bapp_is_inspected_not_executed(self):
+        path = self.make_file("Installer.bapp", b"sample package")
+        cmd, env = launcher.plan_launch(path, available=lambda _: None)
+        self.assertEqual(cmd, ["bordify-package", "inspect", str(path)])
+        self.assertEqual(env, {})
+
+    def test_macho_metacharacters_are_never_interpreted(self):
+        path = self.make_file("a $(echo BAD); test.macho", b"\xcf\xfa\xed\xfe" + bytes(8))
+        with self.assertRaisesRegex(launcher.LaunchError, "execution is disabled"):
+            launcher.plan_launch(path, available=self.available)
 
     def test_elf_native(self):
         path = self.make_file("local", b"\x7fELF" + bytes(32))
