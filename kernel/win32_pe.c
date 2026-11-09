@@ -105,6 +105,12 @@ static uint32_t bridge_address(const uint8_t *image, uint32_t size,
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 27u;
     if (name_in_image(image,size,name_rva,"VirtualFree"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 28u;
+    if (name_in_image(image,size,name_rva,"LoadLibraryA"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 29u;
+    if (name_in_image(image,size,name_rva,"GetProcAddress"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 30u;
+    if (name_in_image(image,size,name_rva,"FreeLibrary"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 31u;
     return 0;
 }
 
@@ -443,6 +449,18 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         0x53,0x8d,0x5c,0x24,0x08,0xb8,22,0,0,0,
         0xcd,0x80,0x5b,0xc2,0x0c,0
     };
+    static const uint8_t load_library_a[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,23,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t get_proc_address[]={
+        0x53,0x8d,0x5c,0x24,0x08,0xb8,24,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x08,0
+    };
+    static const uint8_t free_library[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,25,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
     static const uint8_t *const code[WIN32_PE_BRIDGE_COUNT]={
         exit_process,get_std_handle,write_file,get_last_error,
         create_file,read_file,close_handle,
@@ -451,7 +469,8 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         get_command_line,get_command_line,set_last_error,false_value,
         crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
         crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
-        virtual_alloc,virtual_free
+        virtual_alloc,virtual_free,
+        load_library_a,get_proc_address,free_library
     };
     static const size_t lengths[WIN32_PE_BRIDGE_COUNT]={
         sizeof(exit_process),sizeof(get_std_handle),
@@ -465,7 +484,8 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
         sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
         sizeof(crt_bridge),sizeof(crt_bridge),
-        sizeof(virtual_alloc),sizeof(virtual_free)
+        sizeof(virtual_alloc),sizeof(virtual_free),
+        sizeof(load_library_a),sizeof(get_proc_address),sizeof(free_library)
     };
     if (!fits(size,WIN32_PE_CMDLINE_W_OFFSET,WIN32_PE_CMDLINE_LIMIT*2u))
         return false;
