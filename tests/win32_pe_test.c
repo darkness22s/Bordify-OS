@@ -39,6 +39,12 @@ int main(void) {
     assert(win32_pe_stage(image,n,memory,2u*1024u*1024u,&result));
     assert(result.imported_functions==3u && result.reject_reason==WIN32_PE_OK);
     p32(image+0x400u,0x1260u);
+    /* MinGW writes a directory Size including ILT/IAT/name data, not
+     * merely the 2*20-byte import descriptor region. */
+    p32(image+0x80u+24u+108u,0x300u);
+    assert(win32_pe_stage(image,n,memory,2u*1024u*1024u,&result));
+    assert(result.imported_functions==3u);
+    p32(image+0x80u+24u+108u,40u);
     assert(win32_pe_stage(image,n,memory,2u*1024u*1024u,&result));
 
     /* Per-process strings live above the image in ring-3 mapped RAM. */
