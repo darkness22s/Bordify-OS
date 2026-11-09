@@ -103,20 +103,22 @@ static bool fat_sync(void) {
     return ata_flush();
 }
 
-static void zero_cluster(uint16_t cluster) {
+static bool zero_cluster(uint16_t cluster) {
     uint8_t zeros[512];
     kmemset(zeros, 0, sizeof(zeros));
     uint32_t lba = cluster_lba(cluster);
-    for (uint32_t i = 0; i < volume.spc; i++) {
-        ata_write_sectors(lba + i, 1, zeros);
+    for (uint32_t i=0;i<volume.spc;++i) {
+        if (!ata_write_sectors(lba+i,1,zeros)) return false;
     }
+    return true;
 }
 
 static uint16_t alloc_cluster(void) {
     for (uint32_t cluster = 2; cluster < volume.cluster_count + 2; cluster++) {
         if (fat_get((uint16_t)cluster) == 0) {
+            /* Do not allocate a cluster whose contents couldn't be zeroed. */
+            if (!zero_cluster((uint16_t)cluster)) return 0;
             fat_set((uint16_t)cluster, 0xFFFF);
-            zero_cluster((uint16_t)cluster);
             return (uint16_t)cluster;
         }
     }
@@ -484,7 +486,9 @@ bool fat16_mount(void) {
                             (uint32_t)bpb.fat_count * bpb.fat_sectors -
                             volume.root_sectors) / bpb.sectors_per_cluster;
 
-    if (volume.spc_bytes > FAT16_MAX_CLUSTER_BUFFER || volume.cluster_count < 4085) {
+    if (volume.spc_bytes > FAT16_MAX_CLUSTER_BUFFER ||
+        volume.cluster_count < 4085 || volume.cluster_count > 65524u ||
+        volume.cluster_count+2u > (uint32_t)bpb.fat_sectors*256u) {
         kprintf("[fat16] unsupported volume (spc=%u clusters=%u)\n",
                 (uint32_t)volume.spc_bytes, volume.cluster_count);
         return false;
@@ -860,8 +864,13 @@ static bool write_entry_data(fat_entry_t *entry, uint16_t dir_cluster,
             return false;
         }
     }
-    if (clusters_needed == 0) {
-        first = 0;
+    if (clusters_needed == 0) first=0;
+    /* Persist the *new* chain before changing the directory entry.
+     * If the metadata write fails, the previous file is still readable. */
+    if (!fat_sync()) {
+        if (first) free_chain(first);
+        (void)fat_sync();
+        return false;
     }
     raw_dir_entry_t raw;
     if (!dir_read_entry(dir_cluster, entry->slot, &raw)) {
@@ -870,9 +879,7 @@ static bool write_entry_data(fat_entry_t *entry, uint16_t dir_cluster,
         }
         return false;
     }
-    if (raw.cluster_low >= 2 && raw.cluster_low != first) {
-        free_chain(raw.cluster_low);
-    }
+    uint16_t previous=raw.cluster_low;
     raw.cluster_low = first;
     raw.cluster_high = 0;
     raw.size = size;
@@ -881,17 +888,19 @@ static bool write_entry_data(fat_entry_t *entry, uint16_t dir_cluster,
         if (first) {
             free_chain(first);
         }
-        fat_sync();
+        (void)fat_sync();
         return false;
     }
-    entry->cluster = first;
-    entry->size = size;
-    fat_sync();
-    return true;
+    /* Only release the previous chain after the replacement directory
+     * entry is durable; reporting success requires the second FAT sync. */
+    if (previous>=2 && previous!=first) free_chain(previous);
+    entry->cluster=first;
+    entry->size=size;
+    return fat_sync();
 }
 
 int fat16_write(uint16_t dir_cluster, const char *name, const void *buffer, uint32_t size) {
-    if (!mounted) {
+    if (!mounted || (!buffer && size) || size>0x7fffffffu) {
         return -1;
     }
     fat_entry_t entry;
