@@ -50,6 +50,25 @@ static bool wait_data_phase_complete(uint32_t timeout) {
     return false;
 }
 
+/* ATA software reset is a last resort after a failed PIO command:
+ * deassert SRST, wait until BSY clears and re-select the primary master.
+ * This is not a replacement for transactional FAT writes. */
+static bool ata_recover(void) {
+    uint32_t irq=irq_save();
+    outb(ATA_PRIMARY_CTRL,0x04); /* SRST */
+    for(unsigned i=0;i<5u;++i)(void)inb(ATA_PRIMARY_CTRL);
+    outb(ATA_PRIMARY_CTRL,0x00);
+    for(unsigned i=0;i<5u;++i)(void)inb(ATA_PRIMARY_CTRL);
+    bool ok=wait_command_complete(2000000);
+    if(ok) {
+        outb(ATA_PRIMARY_IO+6,0xA0); /* primary master */
+        io_wait();
+        ok=wait_command_complete(2000000);
+    }
+    irq_restore(irq);
+    return ok;
+}
+
 static int wait_drq(uint32_t timeout) {
     while (timeout--) {
         uint8_t status = inb(ATA_PRIMARY_IO + 7);
@@ -148,6 +167,7 @@ bool ata_read_sectors(uint32_t lba,uint8_t count,void *buffer) {
         kprintf("[ata-retry] read lba=%u count=%u attempt=%u\n",
                 lba,(unsigned)count,attempt+1u);
 #endif
+        if(attempt<2u && !ata_recover()) return false;
         io_wait();
     }
     return false;
@@ -201,6 +221,7 @@ bool ata_write_sectors(uint32_t lba,uint8_t count,const void *buffer) {
         kprintf("[ata-retry] write lba=%u count=%u attempt=%u\n",
                 lba,(unsigned)count,attempt+1u);
 #endif
+        if(attempt<2u && !ata_recover()) return false;
         io_wait();
     }
     return false;
