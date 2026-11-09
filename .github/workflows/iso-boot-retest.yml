@@ -1,0 +1,42 @@
+name: Retest preserved Linux ISO boot (fast, no rebuild)
+on:
+  push:
+    branches: [test/iso-boot-retest-2026-11-09]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  boot-retest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU and screenshot parser
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 python3-pil
+      - name: Retrieve original assembled ISO from previous run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh run download 42647703502 \
+            -n Bordify-Linux-ISO-UNVERIFIED \
+            -D dist
+          test -s dist/Bordify-OS-Linux-amd64.iso
+          file dist/Bordify-OS-Linux-amd64.iso
+      - name: Boot actual ISO and inspect GUI via virtual monitor
+        env:
+          BORDIFY_QEMU_BOOT_TIMEOUT: "420"
+        run: python3 linux/tests/boot_iso.py dist/Bordify-OS-Linux-amd64.iso
+      - name: Upload boot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bordify-boot-retest-screen
+          path: |
+            build/linux/qemu-*.ppm
+            build/linux/qemu-*.log
+          if-no-files-found: warn
+          retention-days: 7
