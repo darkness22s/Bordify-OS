@@ -260,6 +260,10 @@ bool win32_pe_dll_bind_imports(uint8_t *m,
                    !read_import_string(m,size,raw+2u,proc))return false;
                 symbol=proc;
             }
+            /* Binding must never overwrite import descriptors: they are
+             * loader metadata, not writable IAT storage. */
+            if(dest<(uint64_t)offset+info->import_size &&
+               (uint64_t)offset<dest+4u)return false;
             uint32_t address=lookup(context,dll_name,symbol,ordinal);
             if(!address)return false;
             /* A malformed descriptor chain must not bind the same IAT
