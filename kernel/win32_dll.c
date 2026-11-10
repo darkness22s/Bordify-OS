@@ -475,6 +475,7 @@ uint32_t win32_dll_symbol(win32_dll_t *dll,uint32_t handle,
         /* Never dereference an absent VM or an out-of-bounds module image
          * when resolving an export from a previously loaded DLL. */
         if(!dll->vm || !dll->vm->guest || !m->info.image_size ||
+           m->info.guest_base!=handle ||
            handle<dll->vm->base ||
            (uint64_t)(handle-dll->vm->base)+m->info.image_size>
                dll->vm->bytes)
