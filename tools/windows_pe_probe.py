@@ -19,7 +19,7 @@ BRIDGES = {
     "getcommandlinea", "getcommandlinew",
     "setlasterror", "isdebuggerpresent",
     "virtualalloc", "virtualfree",
-    "loadlibrarya", "getprocaddress", "freelibrary",
+    "loadlibrarya", "loadlibraryw", "getprocaddress", "freelibrary",
 }
 MSVCRT_BRIDGES = {
     "strlen", "memcpy", "memset", "memcmp", "strcmp", "strncmp",
