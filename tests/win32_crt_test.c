@@ -82,10 +82,11 @@ int main(void) {
 
     /* Every memory operation validates the entire requested range. */
     assert(call(31,BASE-1u,'x',0)==UINT32_MAX);
-    assert(call(31,BASE+BYTES-1u,'X',0)==UINT32_MAX);
     assert(call(30,BASE-1u,'x',0)==UINT32_MAX);
     assert(call(10,BASE-1u,0,0)==UINT32_MAX);
     memory[BYTES-1u]='X'; /* explicitly unterminated at guest boundary */
+    assert(call(31,BASE+BYTES-1u,'X',0)==UINT32_MAX);
+    assert(call(30,BASE+BYTES-1u,'X',0)==UINT32_MAX);
     assert(call(10,BASE+BYTES-1u,0,0)==UINT32_MAX);
     assert(call(11,BASE+BYTES-4u,BASE+0x2200,8)==UINT32_MAX);
     assert(call(12,BASE+BYTES-2u,1,8)==UINT32_MAX);
