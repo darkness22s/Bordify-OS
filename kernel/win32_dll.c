@@ -367,6 +367,12 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
         if(!dll->guest || !a->info.image_size || a->handle<dll->base ||
            (uint64_t)(a->handle-dll->base)+a->info.image_size>dll->bytes)
             return false;
+        /* Validate entry RVAs even for already-attached modules: their
+         * state must not conceal a corrupt callback address. */
+        if(a->info.entry_rva &&
+           (a->info.entry_rva>=a->info.image_size ||
+            (uint64_t)a->handle+a->info.entry_rva>UINT32_MAX))
+            return false;
         uint64_t a_end=(uint64_t)a->handle+a->info.image_size;
         for(unsigned j=0;j<i;++j) {
             const win32_dll_image_t *b=&dll->images[j];
