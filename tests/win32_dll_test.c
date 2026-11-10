@@ -142,6 +142,14 @@ int main(void) {
     dll.images[0].handle=0xfffff000u;
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u && modules[0]==0x12345678u && entries[0]==0x87654321u);
+    /* GetProcAddress on a synthetic live image with no VM must fail
+     * cleanly instead of dereferencing a null VM pointer. */
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    dll.images[0].state=2u;
+    dll.images[0].handle=BASE+0x190000u;
+    dll.images[0].info.image_size=0x2000u;
+    assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
     win32_dll_init(&dll,guest,BASE,BYTES);
     assert(!dll.allow_dynamic_init && !dll.images[0].initialized);
     dll.allow_dynamic_init=true;
