@@ -177,6 +177,27 @@ int main(void) {
     dll.images[0].info.guest_base=BASE+0x191000u;
     assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
     assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    /* FreeLibrary must not pretend to run PROCESS_DETACH. The final
+     * reference is retained for an initialized module with DllMain. */
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    dll.images[0].state=2u;
+    dll.images[0].handle=BASE+0x190000u;
+    dll.images[0].info.guest_base=dll.images[0].handle;
+    dll.images[0].info.image_size=0x2000u;
+    dll.images[0].info.entry_rva=0x1000u;
+    dll.images[0].initialized=true;
+    dll.images[0].refs=1u;
+    assert(!win32_dll_free(&dll,dll.images[0].handle));
+    assert(dll.last_error==WIN32_DLL_ERROR_BAD_EXE_FORMAT);
+    assert(dll.images[0].state==2u && dll.images[0].refs==1u);
+    /* An additional reference may be released without unloading. */
+    dll.images[0].refs=2u;
+    assert(win32_dll_free(&dll,dll.images[0].handle));
+    assert(dll.images[0].refs==1u);
+    /* Entryless modules remain eligible for normal release. */
+    dll.images[0].info.entry_rva=0u;
+    assert(win32_dll_free(&dll,dll.images[0].handle));
+    assert(dll.images[0].state==0u);
     win32_dll_init(&dll,guest,BASE,BYTES);
     assert(!dll.allow_dynamic_init && !dll.images[0].initialized);
     dll.allow_dynamic_init=true;
