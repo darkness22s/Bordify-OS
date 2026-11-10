@@ -116,6 +116,18 @@ int main(void) {
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u && modules[0]==0x12345678u &&
            entries[0]==0x87654321u);
+    /* Two live DLLs cannot own overlapping mapped image ranges,
+     * including a dependency that has no DllMain entrypoint. */
+    dll.images[0].handle=BASE+0x190000u;
+    dll.images[1].handle=BASE+0x191000u;
+    dll.images[1].info.entry_rva=0u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u && modules[0]==0x12345678u &&
+           entries[0]==0x87654321u);
+    dll.images[1].handle=BASE+0x192000u;
+    dll.images[1].info.entry_rva=0x1200u;
+    assert(win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==2u);
     dll.images[0].handle=0xfffff000u;
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u && modules[0]==0x12345678u && entries[0]==0x87654321u);
