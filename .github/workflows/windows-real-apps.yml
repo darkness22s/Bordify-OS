@@ -70,6 +70,21 @@ jobs:
               --output build/windows-web-setup-dependencies.json \
               | tee build/windows-web-setup-dependencies.txt
           fi
+          # The real 7zr.exe must expose actionable dependency evidence.
+          # Never interpret this as execution or compatibility.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          results = json.loads(Path("build/windows-dependencies.json").read_text())
+          seven = next(x for x in results if x["filename"].lower() == "7zr.exe")
+          assert seven["total_imports"] > 0, "7zr import table not parsed"
+          assert seven["missing_imports_count"] == (
+              sum(len(seven["dlls"][name]) for name in seven["missing_modules"])
+              + seven["missing_exports_count"]
+          ), "inconsistent missing dependency classification"
+          print("[winprobe] 7zr unresolved DLL modules:", seven["missing_modules"])
+          print("[winprobe] 7zr unresolved exports:", seven["missing_exports"][:12])
+          PY
           python3 tools/windows_pe_probe.py build/apps/winreal.exe \
             --output build/windows-compiler-demo.json \
             | tee build/windows-compiler-demo.txt
