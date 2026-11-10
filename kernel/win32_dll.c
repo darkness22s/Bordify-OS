@@ -358,6 +358,24 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
     uint32_t planned_entries[WIN32_DLL_MAX_IMAGES];
     uint32_t planned_count=0u;
     uint8_t visited=0u;
+    /* Reject overlapping live module images before publishing any attach
+     * addresses. An overlapping mapping would let one DLL's callback
+     * execute bytes belonging to another DLL. Check even entryless DLLs. */
+    for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i) {
+        const win32_dll_image_t *a=&dll->images[i];
+        if(a->state!=2u)continue;
+        if(!dll->guest || !a->info.image_size || a->handle<dll->base ||
+           (uint64_t)(a->handle-dll->base)+a->info.image_size>dll->bytes)
+            return false;
+        uint64_t a_end=(uint64_t)a->handle+a->info.image_size;
+        for(unsigned j=0;j<i;++j) {
+            const win32_dll_image_t *b=&dll->images[j];
+            if(b->state!=2u)continue;
+            uint64_t b_end=(uint64_t)b->handle+b->info.image_size;
+            if((uint64_t)a->handle<b_end &&
+               (uint64_t)b->handle<a_end)return false;
+        }
+    }
     for(unsigned pass=0;pass<WIN32_DLL_MAX_IMAGES;++pass) {
         bool progress=false;
         for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i) {
