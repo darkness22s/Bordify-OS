@@ -128,6 +128,9 @@ int main(void) {
     dll.images[1].info.entry_rva=0x1200u;
     assert(win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==2u);
+    /* The successful adjacent-image plan overwrote the output slots;
+     * re-arm sentinels before checking the next rejection path. */
+    modules[0]=0x12345678u;entries[0]=0x87654321u;
     dll.images[0].handle=0xfffff000u;
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u && modules[0]==0x12345678u && entries[0]==0x87654321u);
