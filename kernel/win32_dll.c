@@ -21,7 +21,8 @@ static const export_t kernel32_exports[]={
 static const export_t msvcrt_exports[]={
     {"strlen",16},{"memcpy",17},{"memset",18},{"memcmp",19},
     {"strcmp",20},{"strncmp",21},{"malloc",22},{"free",23},
-    {"calloc",24},{"memmove",25},{"realloc",26},{"strchr",33}
+    {"calloc",24},{"memmove",25},{"realloc",26},{"strchr",33},
+    {"strrchr",34}
 };
 static bool in_range(const win32_dll_t *dll,uint32_t address) {
     return dll && dll->guest && address>=dll->base &&
