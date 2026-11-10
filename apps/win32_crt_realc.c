@@ -47,6 +47,16 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
        guest_strchr(text,'w')!=text ||
        guest_strchr(text,'e')!=text+14) ExitProcess(73u);
 
+    FARPROC reverse_proc=GetProcAddress(imported_crt,"strrchr");
+    if(!reverse_proc) ExitProcess(74u);
+    char *(__cdecl *guest_strrchr)(const char *,int)=
+        (char *(__cdecl *)(const char *,int))reverse_proc;
+    if(guest_strrchr(text,'n')!=text+10 ||
+       guest_strrchr(text,'!')!=NULL ||
+       guest_strrchr(text,0)!=text+15 ||
+       guest_strrchr(text,'w')!=text ||
+       guest_strrchr(text,'e')!=text+14) ExitProcess(75u);
+
     char *allocated=(char *)malloc(36u);
     if(!allocated) ExitProcess(65u);
     memset(allocated,'B',35u);
