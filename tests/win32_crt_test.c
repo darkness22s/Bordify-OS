@@ -21,6 +21,20 @@ int main(void) {
     assert(call(30,BASE+0x2000,'B',0)==BASE+0x2007);
     assert(call(30,BASE+0x2000,'z',0)==0u);
     assert(call(30,BASE+0x2000,0,0)==BASE+0x200f);
+    /* strchr must compare unsigned char values and return the first match. */
+    memory[0x2500]=0x80u;
+    memory[0x2501]='a';
+    memory[0x2502]=0x80u;
+    memory[0x2503]=0;
+    assert(call(30,BASE+0x2500,0x180u,0)==BASE+0x2500);
+    assert(call(30,BASE+0x2500,'a',0)==BASE+0x2501);
+    assert(call(30,BASE+0x2500,0,0)==BASE+0x2503);
+    /* A NUL in the final mapped byte is valid; an absent NUL is not. */
+    memory[BYTES-2u]='Q';
+    memory[BYTES-1u]=0;
+    assert(call(30,BASE+BYTES-2u,'Q',0)==BASE+BYTES-2u);
+    assert(call(30,BASE+BYTES-2u,0,0)==BASE+BYTES-1u);
+    assert(call(30,BASE+BYTES-2u,'Z',0)==0u);
     memory[0x2100]='J';
     assert((int32_t)call(14,BASE+0x2000,BASE+0x2100,0)<0);
     assert((int32_t)call(15,BASE+0x2000,BASE+0x2100,0)==0);
