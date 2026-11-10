@@ -88,6 +88,15 @@ jobs:
           python3 tools/windows_pe_probe.py build/apps/winreal.exe \
             --output build/windows-compiler-demo.json \
             | tee build/windows-compiler-demo.txt
+          # The guest exports LoadLibraryW; keep host dependency reports in sync.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("build/windows-compiler-demo.json").read_text())[0]
+          assert "LoadLibraryW" in report["dlls"].get("kernel32.dll", []), "MinGW fixture no longer imports LoadLibraryW"
+          assert "kernel32.dll!LoadLibraryW" not in report["missing_imports"], "Host scanner misclassifies implemented guest API"
+          print("[winprobe] LoadLibraryW classification agrees with guest kernel32 export")
+          PY
           python3 tools/windows_pe_probe.py build/apps/wincrt.exe \
             --output build/windows-crt-compiler-demo.json \
             | tee build/windows-crt-compiler-demo.txt
