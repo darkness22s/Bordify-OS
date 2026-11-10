@@ -352,6 +352,11 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
                            uint32_t *count) {
     if(!dll || !handles || !entries || !count)return false;
     *count=0u;
+    /* Plan atomically: a cycle or invalid entry must not expose a
+     * partially ordered list to the caller. */
+    uint32_t planned_handles[WIN32_DLL_MAX_IMAGES];
+    uint32_t planned_entries[WIN32_DLL_MAX_IMAGES];
+    uint32_t planned_count=0u;
     uint8_t visited=0u;
     for(unsigned pass=0;pass<WIN32_DLL_MAX_IMAGES;++pass) {
         bool progress=false;
@@ -363,10 +368,11 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
             visited|=bit;
             if(m->info.entry_rva) {
                 if(m->info.entry_rva>=m->info.image_size ||
-                   !m->handle)return false;
-                handles[*count]=m->handle;
-                entries[*count]=m->handle+m->info.entry_rva;
-                ++*count;
+                   !m->handle ||
+                   m->handle>UINT32_MAX-m->info.entry_rva)return false;
+                planned_handles[planned_count]=m->handle;
+                planned_entries[planned_count]=m->handle+m->info.entry_rva;
+                ++planned_count;
             }
             progress=true;
         }
@@ -375,6 +381,11 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
     for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
         if(dll->images[i].state==2u && !(visited&(1u<<i)))
             return false;
+    for(uint32_t i=0;i<planned_count;++i) {
+        handles[i]=planned_handles[i];
+        entries[i]=planned_entries[i];
+    }
+    *count=planned_count;
     return true;
 }
 uint32_t win32_dll_load(win32_dll_t *dll,uint32_t guest_name) {
