@@ -506,7 +506,8 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
         crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
         virtual_alloc,virtual_free,
-        load_library_a,get_proc_address,free_library,load_library_w
+        load_library_a,get_proc_address,free_library,load_library_w,
+        crt_bridge
     };
     static const size_t lengths[WIN32_PE_BRIDGE_COUNT]={
         sizeof(exit_process),sizeof(get_std_handle),
@@ -522,7 +523,7 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         sizeof(crt_bridge),sizeof(crt_bridge),
         sizeof(virtual_alloc),sizeof(virtual_free),
         sizeof(load_library_a),sizeof(get_proc_address),sizeof(free_library),
-        sizeof(load_library_w)
+        sizeof(load_library_w),sizeof(crt_bridge)
     };
     if (!fits(size,WIN32_PE_CMDLINE_W_OFFSET,WIN32_PE_CMDLINE_LIMIT*2u))
         return false;
@@ -532,6 +533,7 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         clear_bytes(dest,BRIDGE_SLOT);
         copy_bytes(dest,code[i],lengths[i]);
         if(i>=16u && i<27u) dest[14u]=(uint8_t)(10u+i-16u);
+        if(i==33u) dest[14u]=30u;
     }
     uint8_t *stubs=memory+WIN32_PE_RUNTIME_OFFSET;
     wr32(stubs+12u*BRIDGE_SLOT+1u,
