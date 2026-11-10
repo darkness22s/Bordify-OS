@@ -379,7 +379,10 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
              * must not schedule an already initialized DLL again. */
             if(m->info.entry_rva && !m->initialized) {
                 if(m->info.entry_rva>=m->info.image_size ||
-                   !m->handle ||
+                   !m->handle || !dll->guest ||
+                   m->handle<dll->base ||
+                   (uint64_t)(m->handle-dll->base)+
+                       m->info.image_size>dll->bytes ||
                    m->handle>UINT32_MAX-m->info.entry_rva)return false;
                 planned_handles[planned_count]=m->handle;
                 planned_entries[planned_count]=m->handle+m->info.entry_rva;
