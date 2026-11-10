@@ -472,6 +472,13 @@ uint32_t win32_dll_symbol(win32_dll_t *dll,uint32_t handle,
             symbol=name;
         }
         const win32_dll_image_t *m=&dll->images[slot];
+        /* Never dereference an absent VM or an out-of-bounds module image
+         * when resolving an export from a previously loaded DLL. */
+        if(!dll->vm || !dll->vm->guest || !m->info.image_size ||
+           handle<dll->vm->base ||
+           (uint64_t)(handle-dll->vm->base)+m->info.image_size>
+               dll->vm->bytes)
+            return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
         uint32_t code=win32_pe_dll_resolve(
             dll->vm->guest+(size_t)(handle-dll->vm->base),
             &m->info,symbol,guest_symbol);
