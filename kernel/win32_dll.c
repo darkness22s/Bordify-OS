@@ -365,6 +365,15 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
             uint8_t bit=(uint8_t)(1u<<i);
             if(m->state!=2u || (visited&bit))continue;
             if((m->image_deps&~visited)!=0u)continue;
+            /* An attached parent cannot legitimately depend on a DLL
+             * whose PROCESS_ATTACH has not completed. Reject this
+             * inconsistent graph rather than silently accepting it. */
+            if(m->initialized) {
+                for(unsigned dep=0;dep<WIN32_DLL_MAX_IMAGES;++dep)
+                    if((m->image_deps&(1u<<dep)) &&
+                       !dll->images[dep].initialized &&
+                       dll->images[dep].info.entry_rva)return false;
+            }
             visited|=bit;
             /* PROCESS_ATTACH is once per module lifetime. A later plan
              * must not schedule an already initialized DLL again. */
