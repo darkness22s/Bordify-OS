@@ -663,6 +663,14 @@ void process_handle_interrupt(uint32_t *frame) {
                             kprintf("[win32-dll] dynamic PROCESS_ATTACH rejected in ring 3\n");
                         }
                     } else {
+                        /* The guest DllMain(DLL_PROCESS_DETACH) has now run.
+                         * Clear the attach state before releasing the final
+                         * reference; win32_dll_free deliberately rejects
+                         * unloading an attached image without detach. */
+                        for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i)
+                            if(win32_dll.images[i].state==2u &&
+                               win32_dll.images[i].handle==handle)
+                                win32_dll.images[i].initialized=false;
                         frame[7]=win32_dll_free(&win32_dll,handle);
                         win32_files.last_error=win32_dll.last_error;
                         kprintf("[win32-dll] dynamic PROCESS_DETACH completed in ring 3\n");
