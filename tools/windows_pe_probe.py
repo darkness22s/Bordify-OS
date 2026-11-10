@@ -130,11 +130,19 @@ def probe(path, max_bytes=1<<30):
             else: imports_truncated=True
         else: imports_truncated=True
     all_imports=sum(len(v) for v in dlls.values())
-    unknown=[]
+    # Distinguish missing modules (error 126) from missing exports (127).
+    # This is a host-side estimate, not proof that the guest DLL loader can
+    # load a given file or initialize its dependencies.
+    supported_modules = {"kernel32.dll": BRIDGES, "msvcrt.dll": MSVCRT_BRIDGES}
+    missing_modules = sorted(dll for dll in dlls if dll not in supported_modules)
+    missing_exports = []
+    unknown = []
     for dll, names in dlls.items():
         for name in names:
-            if not ((dll=="kernel32.dll" and name.lower() in BRIDGES) or
-                    (dll=="msvcrt.dll" and name.lower() in MSVCRT_BRIDGES)):
+            if dll not in supported_modules:
+                unknown.append(f"{dll}!{name}")
+            elif name.lower() not in supported_modules[dll]:
+                missing_exports.append(f"{dll}!{name}")
                 unknown.append(f"{dll}!{name}")
     sha=hashlib.sha256(content).hexdigest()
     return {
@@ -148,6 +156,9 @@ def probe(path, max_bytes=1<<30):
         "overlay_bytes":max(0,size-end_on_disk),
         "dlls":dlls,"total_imports":all_imports,
         "missing_imports":unknown[:250],"missing_imports_count":len(unknown),
+        "missing_modules":missing_modules,
+        "missing_exports":missing_exports[:250],
+        "missing_exports_count":len(missing_exports),
         "imports_truncated":imports_truncated,
         "fits_current_pe32_image":(
             not is64 and size<=2*1024*1024 and
@@ -180,6 +191,12 @@ def main():
               f"imports={result['total_imports']} ({len(result['dlls'])} DLLs), "
               f"unsupported={result['missing_imports_count']}, "
               f"PE32-supported={result['fits_current_pe32_image']}")
+        if result["missing_modules"]:
+            print("[winprobe] missing DLL modules (guest error 126 candidate): "
+                  + ", ".join(result["missing_modules"]))
+        if result["missing_exports"]:
+            print("[winprobe] missing exports (guest error 127 candidate): "
+                  + ", ".join(result["missing_exports"][:12]))
         for dll,names in sorted(result["dlls"].items()):
             print(f"[winprobe]   {dll}: {len(names)} imports, sample={', '.join(names[:12])}")
     print("[winprobe] These are host-side PE metadata checks, not execution.")
