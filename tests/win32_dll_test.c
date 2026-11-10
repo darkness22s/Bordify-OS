@@ -94,6 +94,13 @@ int main(void) {
     assert(number==1u && modules[0]==dll.images[0].handle &&
            entries[0]==dll.images[0].handle+0x1000u);
     dll.images[0].initialized=true;
+    /* An attached parent with an unattached dependency is invalid. */
+    dll.images[1].initialized=false;
+    modules[0]=0x12345678u;entries[0]=0x87654321u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u && modules[0]==0x12345678u &&
+           entries[0]==0x87654321u);
+    dll.images[1].initialized=true;
     assert(win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u);
     dll.images[0].initialized=false;
