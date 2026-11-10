@@ -366,7 +366,9 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
             if(m->state!=2u || (visited&bit))continue;
             if((m->image_deps&~visited)!=0u)continue;
             visited|=bit;
-            if(m->info.entry_rva) {
+            /* PROCESS_ATTACH is once per module lifetime. A later plan
+             * must not schedule an already initialized DLL again. */
+            if(m->info.entry_rva && !m->initialized) {
                 if(m->info.entry_rva>=m->info.image_size ||
                    !m->handle ||
                    m->handle>UINT32_MAX-m->info.entry_rva)return false;
