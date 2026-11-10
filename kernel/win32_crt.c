@@ -168,6 +168,16 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
         previous->live=false;
         return ptr;
       }
+      case 30: { /* strchr(const char *s, int c): bounded guest pointer */
+        if(!inside(rt,arg1,1u)) return fail(rt);
+        uint32_t length=0u;
+        if(!cstring_length(rt,arg1,&length)) return fail(rt);
+        const uint8_t *s=bytes(rt,arg1);
+        uint8_t needle=(uint8_t)arg2;
+        for(uint32_t i=0;i<=length;++i)
+            if(s[i]==needle) return arg1+i;
+        return 0u;
+      }
       default: return fail(rt);
     }
 }
