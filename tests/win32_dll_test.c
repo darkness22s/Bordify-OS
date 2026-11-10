@@ -103,6 +103,14 @@ int main(void) {
     dll.images[1].initialized=true;
     assert(win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u);
+    /* A previously attached image must still have a valid entry RVA.
+     * Rejection must not publish any partial attach callbacks. */
+    dll.images[0].info.entry_rva=dll.images[0].info.image_size;
+    modules[0]=0x12345678u;entries[0]=0x87654321u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u && modules[0]==0x12345678u &&
+           entries[0]==0x87654321u);
+    dll.images[0].info.entry_rva=0x1000u;
     dll.images[0].initialized=false;
     dll.images[1].initialized=false;
     dll.images[1].image_deps=1u;
