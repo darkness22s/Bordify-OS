@@ -26,7 +26,8 @@ typedef struct {
 } win32_crt_t;
 void win32_crt_init(win32_crt_t *rt,uint8_t *memory,uint32_t base,size_t extent);
 /* Services 10..20: strlen, memcpy, memset, memcmp, strcmp, strncmp,
- * malloc, free, calloc, memmove and realloc respectively. */
+ * malloc, free, calloc, memmove and realloc respectively.
+ * Service 30: strchr (including lookup of the terminating NUL). */
 uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
                         uint32_t arg1,uint32_t arg2,uint32_t arg3);
 #endif
