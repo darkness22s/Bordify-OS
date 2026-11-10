@@ -110,6 +110,12 @@ int main(void) {
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u && modules[0]==0x12345678u && entries[0]==0x87654321u);
     dll.images[1].image_deps=0u;
+    /* A callback inside an image that extends beyond guest RAM must
+     * never be handed to the ring-3 executor. */
+    dll.images[0].handle=BASE+BYTES-0x1000u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u && modules[0]==0x12345678u &&
+           entries[0]==0x87654321u);
     dll.images[0].handle=0xfffff000u;
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==0u && modules[0]==0x12345678u && entries[0]==0x87654321u);
