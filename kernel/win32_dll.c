@@ -509,6 +509,12 @@ uint32_t win32_dll_free(win32_dll_t *dll,uint32_t handle) {
     if(slot>=0) {
         win32_dll_image_t *m=&dll->images[slot];
         if(!m->refs)return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
+        /* Do not silently discard an attached DLL while its PROCESS_DETACH
+         * callback is still unimplemented. Retain the final reference so
+         * the guest cannot continue with a falsely completed unload. */
+        if(m->refs==1u && !m->dep_refs && m->initialized &&
+           m->info.entry_rva)
+            return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);
         --m->refs;
         if(!m->refs && !m->dep_refs)unload_slot(dll,(unsigned)slot);
         dll->last_error=0u;
