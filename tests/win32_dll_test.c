@@ -88,7 +88,13 @@ int main(void) {
            modules[1]==dll.images[0].handle);
     assert(entries[0]==dll.images[1].handle+0x1200u);
     dll.images[1].image_deps=1u;
+    modules[0]=0x12345678u;entries[0]=0x87654321u;
     assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u && modules[0]==0x12345678u && entries[0]==0x87654321u);
+    dll.images[1].image_deps=0u;
+    dll.images[0].handle=0xfffff000u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u && modules[0]==0x12345678u && entries[0]==0x87654321u);
     win32_dll_init(&dll,guest,BASE,BYTES);
     assert(!dll.allow_dynamic_init && !dll.images[0].initialized);
     dll.allow_dynamic_init=true;
