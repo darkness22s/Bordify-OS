@@ -34,6 +34,19 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
     memcpy(c,b+3,16u);
     if(strcmp(c,text)!=0) ExitProcess(64u);
 
+    /* Resolve the newly implemented cdecl export dynamically so the guest
+     * must execute Bordify's MSVCRT bridge rather than a compiler builtin.
+     * A missing character returns NULL; searching for NUL returns the end. */
+    FARPROC proc=GetProcAddress(imported_crt,"strchr");
+    if(!proc) ExitProcess(72u);
+    char *(__cdecl *guest_strchr)(const char *,int)=
+        (char *(__cdecl *)(const char *,int))proc;
+    if(guest_strchr(text,'r')!=text+8 ||
+       guest_strchr(text,'!')!=NULL ||
+       guest_strchr(text,0)!=text+15 ||
+       guest_strchr(text,'w')!=text ||
+       guest_strchr(text,'e')!=text+9) ExitProcess(73u);
+
     char *allocated=(char *)malloc(36u);
     if(!allocated) ExitProcess(65u);
     memset(allocated,'B',35u);
