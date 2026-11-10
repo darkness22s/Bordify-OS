@@ -150,6 +150,15 @@ int main(void) {
     dll.images[0].info.image_size=0x2000u;
     assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
     assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    /* A live handle must match the PE image base recorded at staging.
+     * Otherwise export resolution could return addresses for a different
+     * mapping, even when both ranges lie inside guest RAM. */
+    win32_vm_t vm;
+    win32_vm_init(&vm,guest,BASE,BYTES);
+    win32_dll_set_reader(&dll,&vm,NULL,NULL);
+    dll.images[0].info.guest_base=BASE+0x191000u;
+    assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
     win32_dll_init(&dll,guest,BASE,BYTES);
     assert(!dll.allow_dynamic_init && !dll.images[0].initialized);
     dll.allow_dynamic_init=true;
