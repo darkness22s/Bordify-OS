@@ -364,7 +364,9 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
     for(unsigned i=0;i<WIN32_DLL_MAX_IMAGES;++i) {
         const win32_dll_image_t *a=&dll->images[i];
         if(a->state!=2u)continue;
-        if(!dll->guest || !a->info.image_size || a->handle<dll->base ||
+        if(!dll->guest || !a->info.image_size ||
+           a->info.guest_base!=a->handle ||
+           a->handle<dll->base ||
            (uint64_t)(a->handle-dll->base)+a->info.image_size>dll->bytes)
             return false;
         /* Validate entry RVAs even for already-attached modules: their
