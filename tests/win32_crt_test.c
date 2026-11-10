@@ -18,6 +18,9 @@ int main(void) {
     strcpy((char *)(memory+0x2100),"Hello, Bordify!");
     assert(call(10,BASE+0x2000,0,0)==15u);
     assert(call(14,BASE+0x2000,BASE+0x2100,0)==0);
+    assert(call(30,BASE+0x2000,'B',0)==BASE+0x2007);
+    assert(call(30,BASE+0x2000,'z',0)==0u);
+    assert(call(30,BASE+0x2000,0,0)==BASE+0x200f);
     memory[0x2100]='J';
     assert((int32_t)call(14,BASE+0x2000,BASE+0x2100,0)<0);
     assert((int32_t)call(15,BASE+0x2000,BASE+0x2100,0)==0);
@@ -57,6 +60,7 @@ int main(void) {
     assert(call(16,WIN32_CRT_HEAP_END-WIN32_CRT_HEAP_START+1u,0,0)==0);
 
     /* Every memory operation validates the entire requested range. */
+    assert(call(30,BASE-1u,'x',0)==UINT32_MAX);
     assert(call(10,BASE-1u,0,0)==UINT32_MAX);
     memory[BYTES-1u]='X'; /* explicitly unterminated at guest boundary */
     assert(call(10,BASE+BYTES-1u,0,0)==UINT32_MAX);
