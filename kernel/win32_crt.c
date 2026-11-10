@@ -178,6 +178,16 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
             if(s[i]==needle) return arg1+i;
         return 0u;
       }
+      case 31: { /* strrchr: last occurrence, including terminating NUL */
+        if(!inside(rt,arg1,1u)) return fail(rt);
+        uint32_t length=0u;
+        if(!cstring_length(rt,arg1,&length)) return fail(rt);
+        const uint8_t *s=bytes(rt,arg1);
+        uint8_t needle=(uint8_t)arg2;
+        for(uint32_t i=length+1u;i>0u;--i)
+            if(s[i-1u]==needle) return arg1+i-1u;
+        return 0u;
+      }
       default: return fail(rt);
     }
 }
