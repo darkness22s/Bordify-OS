@@ -54,7 +54,7 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
     if(guest_strrchr(text,'n')!=text+10 ||
        guest_strrchr(text,'!')!=NULL ||
        guest_strrchr(text,0)!=text+15 ||
-       guest_strrchr(text,'w')!=text ||
+       guest_strrchr(text,'w')!=text+5 ||
        guest_strrchr(text,'e')!=text+14) ExitProcess(75u);
 
     char *allocated=(char *)malloc(36u);
