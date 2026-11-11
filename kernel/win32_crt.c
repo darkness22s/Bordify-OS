@@ -211,7 +211,9 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
         if(!ptr) return 0;
         dst=bytes(rt,ptr);src=bytes(rt,arg1);
         for(uint32_t i=0;i<length;++i)dst[i]=src[i];
-        previous->live=false;
+        /* Release through the common path: when the replacement reuses an
+         * earlier free slot, the old topmost block can be reclaimed. */
+        (void)release(rt,arg1);
         return ptr;
       }
       case 30: { /* strchr(const char *s, int c): bounded guest pointer */
