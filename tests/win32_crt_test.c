@@ -154,6 +154,27 @@ int main(void) {
     assert(call(17,neighbor,0,0)==0);
     assert(call(17,reused,0,0)==0);
 
+    /* Freeing B before C must coalesce both blocks when C is freed.
+     * The next bump allocation must not overlap a stale free record. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t a=call(16,32,0,0);
+    uint32_t b=call(16,48,0,0);
+    uint32_t c=call(16,64,0,0);
+    assert(a && b==a+32u && c==b+48u);
+    assert(call(17,b,0,0)==0);
+    assert(call(17,c,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START+32u);
+    uint32_t combined=call(16,112,0,0);
+    assert(combined==b);
+    assert(call(12,combined,'D',112)==combined);
+    assert(call(17,a,0,0)==0);
+    uint32_t earlier=call(16,32,0,0);
+    assert(earlier==a);
+    assert(call(12,earlier,'E',32)==earlier);
+    for(int i=0;i<112;++i) assert(memory[combined-BASE+i]=='D');
+    assert(call(17,combined,0,0)==0);
+    assert(call(17,earlier,0,0)==0);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
