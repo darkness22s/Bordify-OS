@@ -65,6 +65,14 @@ int main(void) {
     uint32_t enlarged=call(20,p,256,0);
     assert(enlarged==p); /* topmost block grows without moving */
     for(int i=0;i<47;++i)assert(memory[enlarged-BASE+i]=='X');
+    /* Shrinking a tail block releases aligned space for the next malloc. */
+    uint32_t tail_end=rt.next;
+    assert(call(20,p,48,0)==p);
+    assert(rt.next==tail_end-208u);
+    for(int i=0;i<47;++i)assert(memory[p-BASE+i]=='X');
+    uint32_t reclaimed=call(16,208,0,0);
+    assert(reclaimed==p+48u);
+    assert(call(17,reclaimed,0,0)==0);
     uint32_t blocker=call(16,32,0,0);
     assert(blocker!=0 && blocker!=p);
     uint32_t moved=call(20,p,512,0);
