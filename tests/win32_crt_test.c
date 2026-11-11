@@ -180,11 +180,16 @@ int main(void) {
     win32_crt_init(&rt,memory,BASE,BYTES);
     uint32_t hole=call(16,128,0,0);
     uint32_t old_tail=call(16,32,0,0);
-    assert(hole && old_tail==hole+128u);
+    /* A live guard prevents the valid in-place tail-growth optimization,
+     * forcing realloc to use the earlier freed block instead. */
+    uint32_t guard=call(16,16,0,0);
+    assert(hole && old_tail==hole+128u && guard==old_tail+32u);
     assert(call(12,old_tail,'T',32)==old_tail);
     assert(call(17,hole,0,0)==0);
     uint32_t relocated=call(20,old_tail,64,0);
     assert(relocated==hole);
+    /* Releasing the guard must reclaim the adjacent freed old allocation. */
+    assert(call(17,guard,0,0)==0);
     assert(rt.next==WIN32_CRT_HEAP_START+128u);
     for(int i=0;i<32;++i) assert(memory[relocated-BASE+i]=='T');
     assert(call(17,old_tail,0,0)==UINT32_MAX);
