@@ -81,6 +81,22 @@ static bool release(win32_crt_t *rt,uint32_t ptr) {
     if(record->offset+record->bytes==rt->next) {
         rt->next=record->offset;
         record->bytes=0;
+        /* Adjacent previously freed blocks are also part of the free tail.
+         * Reclaim them in reverse order without moving live allocations. */
+        bool changed=true;
+        while(changed) {
+            changed=false;
+            for(size_t i=0;i<WIN32_CRT_MAX_ALLOCS;++i) {
+                win32_crt_allocation_t *candidate=&rt->allocations[i];
+                if(!candidate->live && candidate->bytes &&
+                   candidate->offset+candidate->bytes==rt->next) {
+                    rt->next=candidate->offset;
+                    candidate->bytes=0;
+                    changed=true;
+                    break;
+                }
+            }
+        }
     }
     return true;
 }
