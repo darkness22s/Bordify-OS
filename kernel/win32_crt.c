@@ -159,7 +159,18 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
         if(!arg2) return release(rt,arg1)?0u:fail(rt);
         win32_crt_allocation_t *previous=find_allocation(rt,arg1);
         if(!previous) return fail(rt);
-        if(arg2<=previous->bytes) return arg1;
+        if(arg2<=previous->bytes) {
+            /* A shrinking realloc retains the pointer. Reclaim aligned
+             * trailing space only for the current topmost allocation:
+             * reducing a non-tail record must not overlap later blocks. */
+            uint32_t desired=(arg2+15u)&~15u;
+            if(previous->offset+previous->bytes==rt->next &&
+               desired<previous->bytes) {
+                rt->next=previous->offset+desired;
+                previous->bytes=desired;
+            }
+            return arg1;
+        }
         /* Grow the topmost heap block in place when its tail is free. */
         if(arg2<=UINT32_MAX-15u) {
             uint32_t aligned=(arg2+15u)&~15u;
