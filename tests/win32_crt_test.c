@@ -63,10 +63,16 @@ int main(void) {
     assert((p&15u)==0);
     assert(call(12,p,'X',47)==p);
     uint32_t enlarged=call(20,p,256,0);
-    assert(enlarged && enlarged!=p);
+    assert(enlarged==p); /* topmost block grows without moving */
     for(int i=0;i<47;++i)assert(memory[enlarged-BASE+i]=='X');
+    uint32_t blocker=call(16,32,0,0);
+    assert(blocker!=0 && blocker!=p);
+    uint32_t moved=call(20,p,512,0);
+    assert(moved!=0 && moved!=p); /* non-tail block must move */
+    for(int i=0;i<47;++i)assert(memory[moved-BASE+i]=='X');
     assert(call(17,p,0,0)==UINT32_MAX); /* old allocation was freed */
-    assert(call(17,enlarged,0,0)==0);
+    assert(call(17,blocker,0,0)==0);
+    assert(call(17,moved,0,0)==0);
     assert(call(17,enlarged,0,0)==UINT32_MAX); /* double-free */
     assert(call(17,0,0,0)==0);
     uint32_t q=call(18,12,8,0);
