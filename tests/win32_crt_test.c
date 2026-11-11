@@ -129,6 +129,31 @@ int main(void) {
     assert(call(99,0,0,0)==UINT32_MAX);
     assert(!memcmp(memory+0x2300,"za",2));
 
+    /* Freeing the heap tail must reclaim space without leaving a stale
+     * free-list record that overlaps subsequent bump allocations. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t first=call(16,32,0,0);
+    uint32_t second=call(16,64,0,0);
+    assert(first==BASE+WIN32_CRT_HEAP_START);
+    assert(second==first+32u);
+    assert(call(17,second,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START+32u);
+    uint32_t replacement=call(16,16,0,0);
+    uint32_t neighbor=call(16,48,0,0);
+    assert(replacement==second);
+    assert(neighbor==replacement+16u);
+    assert(call(12,replacement,'A',16)==replacement);
+    assert(call(12,neighbor,'B',48)==neighbor);
+    assert(call(17,first,0,0)==0);
+    uint32_t reused=call(16,32,0,0);
+    assert(reused==first);
+    assert(call(12,reused,'C',32)==reused);
+    for(int i=0;i<16;++i) assert(memory[replacement-BASE+i]=='A');
+    for(int i=0;i<48;++i) assert(memory[neighbor-BASE+i]=='B');
+    assert(call(17,replacement,0,0)==0);
+    assert(call(17,neighbor,0,0)==0);
+    assert(call(17,reused,0,0)==0);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
