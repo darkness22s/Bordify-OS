@@ -24,6 +24,7 @@ BRIDGES = {
 MSVCRT_BRIDGES = {
     "strlen", "memcpy", "memset", "memcmp", "strcmp", "strncmp",
     "malloc", "free", "calloc", "memmove", "realloc",
+    "strchr", "strrchr",
 }
 MAX_IMPORT_DESCRIPTORS = 2048
 MAX_THUNKS_PER_DLL = 8192
