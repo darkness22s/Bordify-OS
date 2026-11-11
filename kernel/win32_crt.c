@@ -160,6 +160,18 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
         win32_crt_allocation_t *previous=find_allocation(rt,arg1);
         if(!previous) return fail(rt);
         if(arg2<=previous->bytes) return arg1;
+        /* Grow the topmost heap block in place when its tail is free. */
+        if(arg2<=UINT32_MAX-15u) {
+            uint32_t aligned=(arg2+15u)&~15u;
+            uint32_t end=previous->offset+previous->bytes;
+            if(end==rt->next && end<=WIN32_CRT_HEAP_END &&
+               aligned<=WIN32_CRT_HEAP_END-previous->offset &&
+               inside(rt,arg1,aligned)) {
+                previous->bytes=aligned;
+                rt->next=previous->offset+aligned;
+                return arg1;
+            }
+        }
         uint32_t length=previous->bytes;
         uint32_t ptr=allocate(rt,arg2,false);
         if(!ptr) return 0;
