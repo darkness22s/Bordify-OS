@@ -574,7 +574,7 @@ void process_handle_interrupt(uint32_t *frame) {
                 frame[7]=active_win32 ? 0u : UINT32_MAX;
                 return;
             case 10: case 11: case 12: case 13: case 14: case 15:
-            case 16: case 17: case 18: case 19: case 20: case 30:
+            case 16: case 17: case 18: case 19: case 20: case 30: case 31:
                 frame[7]=active_win32?
                     win32_crt_call(&win32_crt,frame[7],
                                    frame[4],frame[6],frame[5]) :
