@@ -75,6 +75,13 @@ static bool release(win32_crt_t *rt,uint32_t ptr) {
     win32_crt_allocation_t *record=find_allocation(rt,ptr);
     if(!record) return false;
     record->live=false;
+    /* The topmost allocation can be returned to the bump arena. Clear
+     * its reusable record so a later allocation cannot claim overlapping
+     * memory after the high-water mark moves backwards. */
+    if(record->offset+record->bytes==rt->next) {
+        rt->next=record->offset;
+        record->bytes=0;
+    }
     return true;
 }
 
