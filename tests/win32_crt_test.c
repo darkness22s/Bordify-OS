@@ -77,6 +77,22 @@ int main(void) {
     uint32_t again=call(16,64,0,0);
     assert(again==q); /* use released heap block */
     assert(call(17,again,0,0)==0);
+    /* A failed realloc must preserve both the old allocation and its bytes. */
+    uint32_t retained=call(16,32,0,0);
+    assert(retained!=0);
+    assert(call(12,retained,'R',32)==retained);
+    assert(call(20,retained,WIN32_CRT_HEAP_END-WIN32_CRT_HEAP_START+1u,0)==0);
+    for(int i=0;i<32;++i) assert(memory[retained-BASE+i]=='R');
+    assert(call(17,retained,0,0)==0);
+    /* calloc must clear a recycled allocation, not expose prior contents. */
+    uint32_t recycled=call(16,32,0,0);
+    assert(recycled==retained);
+    assert(call(12,recycled,'S',32)==recycled);
+    assert(call(17,recycled,0,0)==0);
+    uint32_t cleared=call(18,4,8,0);
+    assert(cleared==recycled);
+    for(int i=0;i<32;++i) assert(memory[cleared-BASE+i]==0);
+    assert(call(17,cleared,0,0)==0);
     assert(call(20,0,24,0)!=0); /* realloc(NULL,n) */
     assert(call(16,WIN32_CRT_HEAP_END-WIN32_CRT_HEAP_START+1u,0,0)==0);
 
