@@ -51,11 +51,12 @@ __attribute__((noreturn)) void mainCRTStartup(void) {
     if(!reverse_proc) ExitProcess(74u);
     char *(__cdecl *guest_strrchr)(const char *,int)=
         (char *(__cdecl *)(const char *,int))reverse_proc;
-    if(guest_strrchr(text,'n')!=text+10 ||
-       guest_strrchr(text,'!')!=NULL ||
-       guest_strrchr(text,0)!=text+15 ||
-       guest_strrchr(text,'w')!=text+5 ||
-       guest_strrchr(text,'e')!=text+14) ExitProcess(75u);
+    /* Distinct exit codes identify the exact guest ABI/lookup failure. */
+    if(guest_strrchr(text,'n')!=text+10) ExitProcess(75u);
+    if(guest_strrchr(text,'!')!=NULL) ExitProcess(76u);
+    if(guest_strrchr(text,0)!=text+15) ExitProcess(77u);
+    if(guest_strrchr(text,'w')!=text+5) ExitProcess(78u);
+    if(guest_strrchr(text,'e')!=text+14) ExitProcess(79u);
 
     char *allocated=(char *)malloc(36u);
     if(!allocated) ExitProcess(65u);
