@@ -175,6 +175,26 @@ int main(void) {
     assert(call(17,combined,0,0)==0);
     assert(call(17,earlier,0,0)==0);
 
+    /* realloc into a recycled earlier block must release its old tail.
+     * Otherwise the arena high-water mark grows despite no live tail user. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t hole=call(16,128,0,0);
+    uint32_t old_tail=call(16,32,0,0);
+    assert(hole && old_tail==hole+128u);
+    assert(call(12,old_tail,'T',32)==old_tail);
+    assert(call(17,hole,0,0)==0);
+    uint32_t relocated=call(20,old_tail,64,0);
+    assert(relocated==hole);
+    assert(rt.next==WIN32_CRT_HEAP_START+128u);
+    for(int i=0;i<32;++i) assert(memory[relocated-BASE+i]=='T');
+    assert(call(17,old_tail,0,0)==UINT32_MAX);
+    uint32_t following=call(16,32,0,0);
+    assert(following==old_tail);
+    assert(call(12,following,'F',32)==following);
+    for(int i=0;i<32;++i) assert(memory[relocated-BASE+i]=='T');
+    assert(call(17,following,0,0)==0);
+    assert(call(17,relocated,0,0)==0);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
