@@ -47,6 +47,21 @@ static uint32_t allocate(win32_crt_t *rt,uint32_t count,bool zero) {
         win32_crt_allocation_t *record=&rt->allocations[i];
         if(record->live) continue;
         if(record->bytes>=aligned && record->bytes>0) {
+            /* Preserve the unused portion of a larger freed allocation.
+             * Only split when a spare metadata record exists; otherwise
+             * retaining the whole block remains safe. */
+            if(record->bytes>aligned) {
+                for(size_t k=0;k<WIN32_CRT_MAX_ALLOCS;++k) {
+                    win32_crt_allocation_t *remainder=&rt->allocations[k];
+                    if(!remainder->live && remainder->bytes==0) {
+                        remainder->offset=record->offset+aligned;
+                        remainder->bytes=record->bytes-aligned;
+                        remainder->live=false;
+                        record->bytes=aligned;
+                        break;
+                    }
+                }
+            }
             record->live=true;
             if(zero) {
                 for(uint32_t j=0;j<aligned;++j)
