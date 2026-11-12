@@ -266,6 +266,30 @@ int main(void) {
     assert(call(17,shrink_guard,0,0)==0);
     assert(rt.next==WIN32_CRT_HEAP_START);
 
+    /* Saturated allocation metadata must not overwrite an existing free
+     * record just to allocate from the bump tail. Keep all 32 separated
+     * holes available for coalescing after their live guards are freed. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t slots[WIN32_CRT_MAX_ALLOCS];
+    for(uint32_t i=0;i<WIN32_CRT_MAX_ALLOCS;++i) {
+        slots[i]=call(16,16,0,0);
+        assert(slots[i]==BASE+WIN32_CRT_HEAP_START+i*16u);
+    }
+    for(uint32_t i=0;i<WIN32_CRT_MAX_ALLOCS;i+=2u)
+        assert(call(17,slots[i],0,0)==0);
+    /* No empty metadata slot or free block of 32 bytes remains. */
+    assert(call(16,32,0,0)==0);
+    assert(call(17,slots[1],0,0)==0);
+    uint32_t joined_hole=call(16,32,0,0);
+    assert(joined_hole==slots[0]);
+    assert(call(12,joined_hole,'H',32)==joined_hole);
+    for(uint32_t i=3;i<WIN32_CRT_MAX_ALLOCS;i+=2u)
+        assert(call(17,slots[i],0,0)==0);
+    for(uint32_t i=0;i<32u;++i)
+        assert(memory[joined_hole-BASE+i]=='H');
+    assert(call(17,joined_hole,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
