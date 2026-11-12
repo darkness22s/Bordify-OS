@@ -69,7 +69,10 @@ static uint32_t allocate(win32_crt_t *rt,uint32_t count,bool zero) {
             }
             return rt->base+record->offset;
         }
-        if(!free_slot) free_slot=record;
+        /* A freed block still owns its address range. Never overwrite its
+         * metadata with a bump allocation: doing so leaks the range and
+         * prevents later coalescing when adjacent live blocks are freed. */
+        if(!free_slot && record->bytes==0) free_slot=record;
     }
     if(!free_slot || rt->next>WIN32_CRT_HEAP_END ||
        aligned>WIN32_CRT_HEAP_END-rt->next ||
