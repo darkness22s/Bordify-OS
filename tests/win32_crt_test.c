@@ -311,6 +311,28 @@ int main(void) {
     assert(call(17,grow_guard,0,0)==0);
     assert(rt.next==WIN32_CRT_HEAP_START);
 
+    /* An exact-fit adjacent free block must be consumed completely. The
+     * emptied metadata record must remain available for a later malloc,
+     * and the next live guard must not be overwritten. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t exact=call(16,32,0,0);
+    uint32_t exact_hole=call(16,64,0,0);
+    uint32_t exact_guard=call(16,32,0,0);
+    assert(exact && exact_hole==exact+32u);
+    assert(exact_guard==exact_hole+64u);
+    assert(call(12,exact,'E',32)==exact);
+    assert(call(12,exact_guard,'G',32)==exact_guard);
+    assert(call(17,exact_hole,0,0)==0);
+    assert(call(20,exact,96,0)==exact);
+    uint32_t after_exact=call(16,16,0,0);
+    assert(after_exact==exact_guard+32u);
+    for(int i=0;i<32;++i) assert(memory[exact-BASE+i]=='E');
+    for(int i=0;i<32;++i) assert(memory[exact_guard-BASE+i]=='G');
+    assert(call(17,after_exact,0,0)==0);
+    assert(call(17,exact_guard,0,0)==0);
+    assert(call(17,exact,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
