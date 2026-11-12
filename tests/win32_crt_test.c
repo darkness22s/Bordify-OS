@@ -290,6 +290,27 @@ int main(void) {
     assert(call(17,joined_hole,0,0)==0);
     assert(rt.next==WIN32_CRT_HEAP_START);
 
+    /* realloc can expand into an adjacent free block while preserving
+     * its pointer, contents and the unused suffix for another malloc. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t grow=call(16,32,0,0);
+    uint32_t gap=call(16,128,0,0);
+    uint32_t grow_guard=call(16,32,0,0);
+    assert(grow && gap==grow+32u && grow_guard==gap+128u);
+    assert(call(12,grow,'A',32)==grow);
+    assert(call(12,grow_guard,'G',32)==grow_guard);
+    assert(call(17,gap,0,0)==0);
+    assert(call(20,grow,80,0)==grow);
+    for(int i=0;i<32;++i) assert(memory[grow-BASE+i]=='A');
+    uint32_t suffix=call(16,80,0,0);
+    assert(suffix==grow+80u);
+    assert(call(12,suffix,'S',80)==suffix);
+    for(int i=0;i<32;++i) assert(memory[grow_guard-BASE+i]=='G');
+    assert(call(17,suffix,0,0)==0);
+    assert(call(17,grow,0,0)==0);
+    assert(call(17,grow_guard,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
