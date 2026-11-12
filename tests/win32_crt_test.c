@@ -247,6 +247,25 @@ int main(void) {
     assert(call(17,frag_guard,0,0)==0);
     assert(rt.next==WIN32_CRT_HEAP_START);
 
+    /* Shrinking a live non-tail block returns its aligned suffix to the
+     * allocator without overwriting the adjacent live guard. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t shrink=call(16,128,0,0);
+    uint32_t shrink_guard=call(16,32,0,0);
+    assert(shrink && shrink_guard==shrink+128u);
+    assert(call(12,shrink,'P',32)==shrink);
+    assert(call(12,shrink_guard,'G',32)==shrink_guard);
+    assert(call(20,shrink,32,0)==shrink);
+    uint32_t shrink_reuse=call(16,96,0,0);
+    assert(shrink_reuse==shrink+32u);
+    assert(call(12,shrink_reuse,'R',96)==shrink_reuse);
+    for(int i=0;i<32;++i) assert(memory[shrink-BASE+i]=='P');
+    for(int i=0;i<32;++i) assert(memory[shrink_guard-BASE+i]=='G');
+    assert(call(17,shrink_reuse,0,0)==0);
+    assert(call(17,shrink,0,0)==0);
+    assert(call(17,shrink_guard,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
