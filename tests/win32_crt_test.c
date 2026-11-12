@@ -221,6 +221,32 @@ int main(void) {
     assert(call(17,live_guard,0,0)==0);
     assert(rt.next==WIN32_CRT_HEAP_START);
 
+    /* Adjacent non-tail frees coalesce even when a live guard prevents
+     * bump-tail reclamation. The merged allocation must not corrupt the
+     * guard or leave overlapping free-list records. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t frag_a=call(16,32,0,0);
+    uint32_t frag_b=call(16,48,0,0);
+    uint32_t frag_c=call(16,64,0,0);
+    uint32_t frag_guard=call(16,32,0,0);
+    assert(frag_b==frag_a+32u && frag_c==frag_b+48u);
+    assert(frag_guard==frag_c+64u);
+    assert(call(12,frag_guard,'G',32)==frag_guard);
+    assert(call(17,frag_a,0,0)==0);
+    assert(call(17,frag_c,0,0)==0);
+    assert(call(17,frag_b,0,0)==0);
+    uint32_t frag_joined=call(16,144,0,0);
+    assert(frag_joined==frag_a);
+    assert(call(12,frag_joined,'J',144)==frag_joined);
+    for(int i=0;i<32;++i) assert(memory[frag_guard-BASE+i]=='G');
+    uint32_t frag_next=call(16,16,0,0);
+    assert(frag_next>=frag_guard+32u);
+    for(int i=0;i<144;++i) assert(memory[frag_joined-BASE+i]=='J');
+    assert(call(17,frag_joined,0,0)==0);
+    assert(call(17,frag_next,0,0)==0);
+    assert(call(17,frag_guard,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
