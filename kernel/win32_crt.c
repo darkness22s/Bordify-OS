@@ -262,6 +262,23 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
                 return arg1;
             }
         }
+        /* Grow into a directly adjacent free block without moving the
+         * allocation. Keep any unused suffix in the same free record. */
+        if(arg2<=UINT32_MAX-15u) {
+            uint32_t aligned=(arg2+15u)&~15u;
+            uint32_t end=previous->offset+previous->bytes;
+            uint32_t extra=aligned-previous->bytes;
+            for(size_t k=0;k<WIN32_CRT_MAX_ALLOCS;++k) {
+                win32_crt_allocation_t *neighbor=&rt->allocations[k];
+                if(neighbor->live || !neighbor->bytes ||
+                   neighbor->offset!=end || neighbor->bytes<extra)
+                    continue;
+                neighbor->offset+=extra;
+                neighbor->bytes-=extra;
+                previous->bytes=aligned;
+                return arg1;
+            }
+        }
         uint32_t length=previous->bytes;
         uint32_t ptr=allocate(rt,arg2,false);
         if(!ptr) return 0;
