@@ -200,6 +200,25 @@ int main(void) {
     assert(call(17,following,0,0)==0);
     assert(call(17,relocated,0,0)==0);
 
+    /* Reusing a large freed block for a small request must preserve the
+     * remaining free capacity instead of losing it to internal waste. */
+    win32_crt_init(&rt,memory,BASE,BYTES);
+    uint32_t large=call(16,128,0,0);
+    uint32_t live_guard=call(16,32,0,0);
+    assert(large && live_guard==large+128u);
+    assert(call(17,large,0,0)==0);
+    uint32_t small=call(16,32,0,0);
+    uint32_t remainder=call(16,96,0,0);
+    assert(small==large && remainder==large+32u);
+    assert(call(12,small,'S',32)==small);
+    assert(call(12,remainder,'R',96)==remainder);
+    for(int i=0;i<32;++i) assert(memory[small-BASE+i]=='S');
+    assert(call(17,small,0,0)==0);
+    for(int i=0;i<96;++i) assert(memory[remainder-BASE+i]=='R');
+    assert(call(17,remainder,0,0)==0);
+    assert(call(17,live_guard,0,0)==0);
+    assert(rt.next==WIN32_CRT_HEAP_START);
+
     /* Distinct guest process launches reset all heap bookkeeping. */
     win32_crt_init(&rt,memory,BASE,BYTES);
     assert(call(16,16,0,0)==BASE+WIN32_CRT_HEAP_START);
