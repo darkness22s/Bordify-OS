@@ -223,10 +223,27 @@ uint32_t win32_crt_call(win32_crt_t *rt,uint32_t service,
              * trailing space only for the current topmost allocation:
              * reducing a non-tail record must not overlap later blocks. */
             uint32_t desired=(arg2+15u)&~15u;
-            if(previous->offset+previous->bytes==rt->next &&
-               desired<previous->bytes) {
-                rt->next=previous->offset+desired;
-                previous->bytes=desired;
+            if(desired<previous->bytes) {
+                if(previous->offset+previous->bytes==rt->next) {
+                    rt->next=previous->offset+desired;
+                    previous->bytes=desired;
+                } else {
+                    /* A non-tail shrink can return its trailing aligned
+                     * bytes to the free list, provided metadata is free.
+                     * Release/coalesce the remainder through the normal
+                     * path without ever moving the live prefix. */
+                    for(size_t k=0;k<WIN32_CRT_MAX_ALLOCS;++k) {
+                        win32_crt_allocation_t *tail=&rt->allocations[k];
+                        if(!tail->live && tail->bytes==0) {
+                            tail->offset=previous->offset+desired;
+                            tail->bytes=previous->bytes-desired;
+                            tail->live=true;
+                            previous->bytes=desired;
+                            (void)release(rt,rt->base+tail->offset);
+                            break;
+                        }
+                    }
+                }
             }
             return arg1;
         }
