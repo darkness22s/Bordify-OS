@@ -90,6 +90,27 @@ static bool release(win32_crt_t *rt,uint32_t ptr) {
     win32_crt_allocation_t *record=find_allocation(rt,ptr);
     if(!record) return false;
     record->live=false;
+    /* Coalesce neighboring free blocks in either direction. A live block
+     * is never moved; clearing merged records prevents duplicate claims
+     * on the same address range. This also permits a later large malloc
+     * to reuse multiple adjacent small frees below a live guard. */
+    bool merged=true;
+    while(merged) {
+        merged=false;
+        for(size_t i=0;i<WIN32_CRT_MAX_ALLOCS;++i) {
+            win32_crt_allocation_t *other=&rt->allocations[i];
+            if(other==record || other->live || !other->bytes) continue;
+            if(other->offset+other->bytes==record->offset) {
+                record->offset=other->offset;
+                record->bytes+=other->bytes;
+            } else if(record->offset+record->bytes==other->offset) {
+                record->bytes+=other->bytes;
+            } else continue;
+            other->bytes=0;
+            merged=true;
+            break;
+        }
+    }
     /* The topmost allocation can be returned to the bump arena. Clear
      * its reusable record so a later allocation cannot claim overlapping
      * memory after the high-water mark moves backwards. */
