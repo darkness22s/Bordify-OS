@@ -188,13 +188,15 @@ int main(void) {
     assert(call(17,hole,0,0)==0);
     uint32_t relocated=call(20,old_tail,64,0);
     assert(relocated==hole);
-    /* Releasing the guard must reclaim the adjacent freed old allocation. */
+    /* Releasing the guard reclaims the old allocation AND the split
+     * free remainder immediately below it, down to the live 64-byte
+     * relocated allocation. */
     assert(call(17,guard,0,0)==0);
-    assert(rt.next==WIN32_CRT_HEAP_START+128u);
+    assert(rt.next==WIN32_CRT_HEAP_START+64u);
     for(int i=0;i<32;++i) assert(memory[relocated-BASE+i]=='T');
     assert(call(17,old_tail,0,0)==UINT32_MAX);
     uint32_t following=call(16,32,0,0);
-    assert(following==old_tail);
+    assert(following==relocated+64u);
     assert(call(12,following,'F',32)==following);
     for(int i=0;i<32;++i) assert(memory[relocated-BASE+i]=='T');
     assert(call(17,following,0,0)==0);
