@@ -198,6 +198,38 @@ int main(void) {
     dll.images[0].info.entry_rva=0u;
     assert(win32_dll_free(&dll,dll.images[0].handle));
     assert(dll.images[0].state==0u);
+    /* Executable release must retain an attached DLL until detach exists. */
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    dll.images[0].state=2u;
+    dll.images[0].handle=BASE+0x190000u;
+    dll.images[0].info.guest_base=dll.images[0].handle;
+    dll.images[0].info.image_size=0x2000u;
+    dll.images[0].info.entry_rva=0x1000u;
+    dll.images[0].initialized=true;
+    dll.images[0].dep_refs=1u;
+    dll.exe_image_deps=1u;
+    win32_dll_release_exe_imports(&dll);
+    assert(dll.images[0].state==2u && dll.images[0].dep_refs==0u);
+    assert(dll.images[0].initialized && dll.exe_image_deps==0u);
+    /* Releasing an entryless parent must retain its attached child. */
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    dll.images[0].state=2u;
+    dll.images[0].handle=BASE+0x190000u;
+    dll.images[0].info.guest_base=dll.images[0].handle;
+    dll.images[0].info.image_size=0x2000u;
+    dll.images[0].image_deps=2u;
+    dll.images[0].refs=1u;
+    dll.images[1].state=2u;
+    dll.images[1].handle=BASE+0x192000u;
+    dll.images[1].info.guest_base=dll.images[1].handle;
+    dll.images[1].info.image_size=0x2000u;
+    dll.images[1].info.entry_rva=0x1000u;
+    dll.images[1].initialized=true;
+    dll.images[1].dep_refs=1u;
+    assert(win32_dll_free(&dll,dll.images[0].handle));
+    assert(dll.images[0].state==0u);
+    assert(dll.images[1].state==2u && dll.images[1].dep_refs==0u);
+    assert(dll.images[1].initialized);
     win32_dll_init(&dll,guest,BASE,BYTES);
     assert(!dll.allow_dynamic_init && !dll.images[0].initialized);
     dll.allow_dynamic_init=true;
