@@ -285,7 +285,8 @@ bool win32_pe_dll_bind_imports(uint8_t *m,
             /* A malformed descriptor chain must not bind the same IAT
              * slot twice (possibly to different resolved functions). */
             for(uint32_t prior=0u;prior<functions;++prior)
-                if(patch_rvas[prior]==(uint32_t)dest)return false;
+                if((uint64_t)patch_rvas[prior]<dest+4u &&
+                   dest<(uint64_t)patch_rvas[prior]+4u)return false;
             patch_rvas[functions]=(uint32_t)dest;
             patch_values[functions]=address;
             ++functions;
