@@ -166,6 +166,20 @@ int main(int argc,char **argv) {
     assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
     assert(memcmp(duplicate_iat,memory+0x1550u,
                   sizeof(duplicate_iat))==0);
+    /* Two distinct IAT start addresses may still overlap bytewise.
+     * Reject both patches atomically rather than corrupting a thunk. */
+    make_fixture(file);
+    set_imports(file);
+    p32(file+0x98u+108u,60u); /* two descriptors and terminator */
+    memcpy(file+0x714u,file+0x700u,20u);
+    p32(file+0x724u,0x1551u); /* second IAT overlaps first by 3 bytes */
+    assert(win32_pe_dll_stage(file,sizeof(file),memory,sizeof(memory),
+                              0x40180000u,&info));
+    uint8_t overlapping_iat[5];
+    memcpy(overlapping_iat,memory+0x1550u,sizeof(overlapping_iat));
+    assert(!win32_pe_dll_bind_imports(memory,&info,import_lookup,&calls));
+    assert(memcmp(overlapping_iat,memory+0x1550u,
+                  sizeof(overlapping_iat))==0);
     /* An IAT that aliases the import descriptor itself must be rejected
      * without rewriting loader metadata, even with a valid INT. */
     make_fixture(file);
