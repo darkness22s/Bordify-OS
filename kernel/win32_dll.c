@@ -166,6 +166,10 @@ static void unload_slot(win32_dll_t *dll,unsigned slot) {
     if(slot>=WIN32_DLL_MAX_IMAGES)return;
     win32_dll_image_t *m=&dll->images[slot];
     if(m->state!=2u && m->state!=1u)return;
+    /* PROCESS_DETACH is not implemented. Dependency rollback may drop the
+     * last reference indirectly, so retain initialized images rather than
+     * silently unmapping code whose detach callback never ran. */
+    if(m->state==2u && m->initialized && m->info.entry_rva)return;
     uint8_t real_deps=m->image_deps,builtin_deps=m->builtin_deps;
     uint32_t handle=m->handle;
     clear_module(m);
