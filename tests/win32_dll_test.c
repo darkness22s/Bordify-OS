@@ -7,6 +7,10 @@
 #define BASE 0x40000000u
 #define BYTES (4u*1024u*1024u)
 static uint8_t guest[BYTES];
+static int no_file(const char *name,uint8_t *out,size_t capacity,void *ctx) {
+    (void)name;(void)out;(void)capacity;(void)ctx;
+    return -1;
+}
 int main(void) {
     win32_dll_t dll;
     win32_dll_init(&dll,guest,BASE,BYTES);
@@ -235,6 +239,30 @@ int main(void) {
     dll.allow_dynamic_init=true;
     win32_dll_init(&dll,guest,BASE,BYTES);
     assert(!dll.allow_dynamic_init); /* per-process reset */
+    /* A previously staged but unattached DLL must not be reused through
+     * an unguarded LoadLibrary. This used to return executable exports
+     * without ever running its PROCESS_ATTACH callback. */
+    win32_dll_init(&dll,guest,BASE,BYTES);
+    win32_vm_init(&vm,guest,BASE,BYTES);
+    win32_dll_set_reader(&dll,&vm,no_file,NULL);
+    dll.images[0].state=2u;
+    dll.images[0].handle=BASE+0x190000u;
+    dll.images[0].info.guest_base=dll.images[0].handle;
+    dll.images[0].info.image_size=0x2000u;
+    dll.images[0].info.entry_rva=0x1000u;
+    strcpy(dll.images[0].name,"chromium.dll");
+    assert(!win32_dll_load(&dll,BASE+0x2400u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INIT_FAILED);
+    assert(dll.images[0].refs==0u);
+    /* Guarded syscall entry can schedule the missing attach. */
+    dll.allow_dynamic_init=true;
+    assert(win32_dll_load(&dll,BASE+0x2400u)==dll.images[0].handle);
+    assert(dll.images[0].refs==1u);
+    /* Once attached, normal LoadLibrary reference increments are safe. */
+    dll.images[0].initialized=true;
+    dll.allow_dynamic_init=false;
+    assert(win32_dll_load(&dll,BASE+0x2400u)==dll.images[0].handle);
+    assert(dll.images[0].refs==2u);
     puts("Win32 imported-module handles, attach dependency ordering: PASS");
     return 0;
 }
