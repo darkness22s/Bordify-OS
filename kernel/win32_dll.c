@@ -259,6 +259,13 @@ static uint32_t load_name_mode(win32_dll_t *dll,const char *name,bool dependency
     if(slot>=0) {
         win32_dll_image_t *m=&dll->images[slot];
         if(m->state!=2u)return fail(dll,WIN32_DLL_ERROR_BAD_EXE_FORMAT);
+        /* An existing staged image is not necessarily initialized. A
+         * dependency or an unguarded dynamic load must not expose its
+         * exports before the guest executes PROCESS_ATTACH. Startup
+         * binding and guarded top-level LoadLibrary may schedule attach. */
+        if(m->info.entry_rva && !m->initialized && !dll->binding_exe &&
+           (dependency || !dll->allow_dynamic_init))
+            return fail(dll,WIN32_DLL_ERROR_INIT_FAILED);
         uint16_t *refs=dependency?&m->dep_refs:&m->refs;
         if(*refs==65535u)return fail(dll,WIN32_DLL_ERROR_NOT_ENOUGH_MEMORY);
         ++*refs;
