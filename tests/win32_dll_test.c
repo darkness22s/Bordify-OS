@@ -258,6 +258,11 @@ int main(void) {
     dll.allow_dynamic_init=true;
     assert(win32_dll_load(&dll,BASE+0x2400u)==dll.images[0].handle);
     assert(dll.images[0].refs==1u);
+    /* GetProcAddress must not expose DLL code while PROCESS_ATTACH is
+     * still pending, even when the caller already owns a load handle. */
+    assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INIT_FAILED);
+    assert(dll.images[0].refs==1u && !dll.images[0].initialized);
     /* Once attached, normal LoadLibrary reference increments are safe. */
     dll.images[0].initialized=true;
     dll.allow_dynamic_init=false;
