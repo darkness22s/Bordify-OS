@@ -37,6 +37,12 @@ user-mode NAT address range. HTTP and HTTPS (TLS 1.2) are supported.
 `SYSTEM/SETTINGS.CFG`. It also shows kernel, memory, display, disk, clock
 and uptime information, plus Restart and Power off controls.
 
+## Windows runtime progress — draft PR #2
+
+The experimental Windows compatibility branch executes **independently MinGW-compiled PE32 console programs** in protected ring-3 memory. It implements a bounded `msvcrt.dll` memory/string subset, bounded 2 MiB `VirtualAlloc`/`VirtualFree` within a 4 MiB process mapping, and a small virtual `kernel32.dll`/ `msvcrt.dll` export surface. A **file-backed PE32 DLL loader** now maps up to four real 32-bit DLLs from FAT16 into a shared 2 MiB guest arena, applies HIGHLOW relocations, resolves exports, binds import tables recursively, and tracks dependency references. Both dynamic `LoadLibraryA/W` chains and a **statically imported EXE → CHAIN.DLL → BORDLL.DLL** path execute successfully in QEMU. Two consecutive boots verify the native DLL calls and persistent FAT16 files.
+
+**This is not full Windows compatibility.** The DLL loader rejects unsupported imports, dependency cycles, TLS, delay-load and forwarded exports, and it invokes validated `DllMain(DLL_PROCESS_ATTACH/DETACH)` for startup-imported DLLs in dependency order **and** for bounded top-level guest `LoadLibraryA/W`/final `FreeLibrary` calls. These dynamic callbacks execute on the interrupted user thread, with failed attach rolled back and reported as error 1114. Recursive dynamic initialization of imported DLLs, CRT startup and TLS remain unsupported. The system still lacks a Windows process/thread scheduler, NT virtual memory, registry/installer services, USER32/GDI32 GUI, structured exceptions, scalable filesystem/paths, a native x64 runtime and production W^X isolation. Real Chrome and 7-Zip still do not run. See [the precise capability matrix](docs/application-compatibility.md), [the Windows QEMU two-boot evidence](https://github.com/darkness22s/Bordify-OS/actions/runs/42638141507) and [draft PR #2](https://github.com/darkness22s/Bordify-OS/pull/2).
+
 ## Experimental cross-platform compatibility (development branch only)
 
 The draft compatibility branch includes a real isolated ELF32 demo

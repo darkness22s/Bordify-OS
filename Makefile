@@ -1,6 +1,7 @@
 CC ?= gcc
 PYTHON ?= python3
 CLANG ?= clang
+MINGW_CC ?= i686-w64-mingw32-gcc
 
 CFLAGS := -m32 -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
           -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-builtin \
@@ -9,6 +10,9 @@ CFLAGS := -m32 -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
           -fno-asynchronous-unwind-tables -fno-unwind-tables -Iinclude \
           -Ithird_party/bearssl/inc -Ithird_party/bearssl/src
 KERNEL_CFLAGS := $(CFLAGS) -Ikernel
+ifeq ($(CHROME_PROBE),1)
+KERNEL_CFLAGS += -DBORDIFY_CHROME_PROBE=1
+endif
 BEARSSL_CFLAGS := -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 \
                   -DBR_USE_WIN32_RAND=0 -DBR_USE_UNIX_TIME=0 -DBR_USE_WIN32_TIME=0 \
                   -DBR_RDRAND=0 -DBR_AES_X86NI=0 -DBR_SSE2=0 -DBR_POWER8=0 \
@@ -27,6 +31,61 @@ OFILES := $(patsubst kernel/%.c,$(BUILD)/kernel/%.o,$(CFILES)) \
           $(BUILD)/font.o $(BEARSSL_OFILES)
 
 all: $(KERNEL) $(BUILD)/apps/hello.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/winhello.exe $(BUILD)/apps/winio.exe $(BUILD)/apps/dmgdemo.dmg $(BUILD)/apps/zdmg.dmg $(BUILD)/apps/hfsplus.dmg $(BUILD)/apps/armhello.mch $(BUILD)/apps/win64demo.exe $(BUILD)/apps/win64setup.exe $(BUILD)/apps/darwin.mch $(BUILD)/apps/mount.dmg $(BUILD)/apps/armwork.mch $(BUILD)/apps/armcalc.mch $(BUILD)/apps/cocoa.mch
+
+# A genuinely C-compiled Windows PE32 program with normal kernel32 DLL
+# imports and a preferred image base that requires PE32 HIGHLOW rebasing.
+# A genuine MinGW-built, CRT-free, import-free PE32 DLL with one exported
+# stdcall function and a real HIGHLOW data relocation. It is used only in
+# opt-in Windows test images, not required by the default OS image build.
+$(BUILD)/apps/bordll.dll: apps/win32_testdll.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,0 -Wl,--image-base,0x10000000 \
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
+	  -Wl,--out-implib,$(BUILD)/apps/libbordll.a -o $@ $<
+
+$(BUILD)/apps/chain.dll: apps/win32_chaindll.c $(BUILD)/apps/bordll.dll
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,0 -Wl,--image-base,0x11000000 \
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
+	  -L$(BUILD)/apps -Wl,--out-implib,$(BUILD)/apps/libchain.a -o $@ $< -lbordll
+
+$(BUILD)/apps/init.dll: apps/win32_initdll.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,_DllMain@12 -Wl,--image-base,0x12000000 \
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias \
+	  -Wl,--out-implib,$(BUILD)/apps/libinit.a -o $@ $<
+
+$(BUILD)/apps/bfail.dll: apps/win32_faildll.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib -shared \
+	  -Wl,--entry,_DllMain@12 -Wl,--image-base,0x13000000 \
+	  -Wl,--enable-reloc-section -Wl,--add-stdcall-alias -o $@ $<
+
+$(BUILD)/apps/winstat.exe: apps/win32_static_realc.c $(BUILD)/apps/chain.dll $(BUILD)/apps/init.dll
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib \
+	  -Wl,--entry,_mainCRTStartup -Wl,--subsystem,console \
+	  -Wl,--image-base,0x00400000 -Wl,--enable-reloc-section \
+	  -L$(BUILD)/apps -o $@ $< -lchain -linit -lkernel32
+
+$(BUILD)/apps/winreal.exe: apps/win32_realc.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-stack-protector -nostdlib \
+	  -Wl,--entry,_mainCRTStartup -Wl,--subsystem,console \
+	  -Wl,--image-base,0x00400000 -Wl,--enable-reloc-section \
+	  -o $@ $< -lkernel32
+
+# Independent MinGW C-compiled PE32 importing both kernel32.dll and
+# msvcrt.dll. CRT startup intentionally bypassed; ABI is tested directly.
+$(BUILD)/apps/wincrt.exe: apps/win32_crt_realc.c
+	@mkdir -p $(BUILD)/apps
+	$(MINGW_CC) -Os -std=gnu11 -fno-builtin -fno-stack-protector -nostdlib \
+	  -Wl,--entry,_mainCRTStartup -Wl,--subsystem,console \
+	  -Wl,--image-base,0x00400000 -Wl,--enable-reloc-section \
+	  -o $@ $< -lmsvcrt -lkernel32
 
 $(BUILD)/apps/win64setup.exe: tools/genwin64setup.py $(BUILD)/apps/win64demo.exe
 	@mkdir -p $(BUILD)/apps
@@ -145,6 +204,22 @@ $(BUILD)/tests/win32_pe_test: tests/win32_pe_test.c kernel/win32_pe.c kernel/win
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_pe_test.c kernel/win32_pe.c -o $@
 
+$(BUILD)/tests/win32_pe_dll_test: tests/win32_pe_dll_test.c kernel/win32_pe_dll.c kernel/win32_pe_dll.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_pe_dll_test.c kernel/win32_pe_dll.c -o $@
+
+$(BUILD)/tests/win32_dll_test: tests/win32_dll_test.c kernel/win32_dll.c kernel/win32_dll.h kernel/win32_pe.h kernel/win32_pe_dll.c kernel/win32_vm.c
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_dll_test.c kernel/win32_dll.c kernel/win32_pe_dll.c kernel/win32_vm.c -o $@
+
+$(BUILD)/tests/win32_vm_test: tests/win32_vm_test.c kernel/win32_vm.c kernel/win32_vm.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_vm_test.c kernel/win32_vm.c -o $@
+
+$(BUILD)/tests/win32_crt_test: tests/win32_crt_test.c kernel/win32_crt.c kernel/win32_crt.h
+	@mkdir -p $(BUILD)/tests
+	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_crt_test.c kernel/win32_crt.c -o $@
+
 $(BUILD)/tests/win32_files_test: tests/win32_files_test.c kernel/win32_pe.c kernel/win32_files.c kernel/win32_files.h $(BUILD)/apps/winio.exe
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/win32_files_test.c kernel/win32_pe.c kernel/win32_files.c -o $@
@@ -193,9 +268,13 @@ $(BUILD)/tests/hfsplus_read_test: tests/hfsplus_read_test.c kernel/hfsplus_read.
 	@mkdir -p $(BUILD)/tests
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror -Ikernel tests/hfsplus_read_test.c kernel/hfsplus_read.c kernel/hfsplus_probe.c kernel/udif_blkx.c kernel/zlib_inflate.c kernel/package_inspect.c -lz -o $@
 
-test: $(BUILD)/tests/cocoa_lifecycle_test $(BUILD)/tests/win32_files_test $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
+test: $(BUILD)/tests/win32_pe_dll_test $(BUILD)/tests/cocoa_lifecycle_test $(BUILD)/tests/win32_dll_test $(BUILD)/tests/win32_vm_test $(BUILD)/tests/win32_crt_test $(BUILD)/tests/win32_files_test $(BUILD)/tests/a64_c_test $(BUILD)/tests/a64_workload_test $(BUILD)/tests/hfsplus_read_test $(BUILD)/tests/pe64_vm_test $(BUILD)/tests/pe64_install_test $(BUILD)/tests/darwin_macho_test $(BUILD)/tests/exec_inspect_test $(BUILD)/tests/package_inspect_test $(BUILD)/tests/win32_pe_test $(BUILD)/tests/udif_blkx_test $(BUILD)/tests/a64_macho_test $(BUILD)/tests/zlib_inflate_test $(BUILD)/tests/hfsplus_probe_test
 	./$(BUILD)/tests/cocoa_lifecycle_test
 	$(PYTHON) tests/linkcocoaobj_test.py
+	./$(BUILD)/tests/win32_pe_dll_test
+	./$(BUILD)/tests/win32_dll_test
+	./$(BUILD)/tests/win32_vm_test
+	./$(BUILD)/tests/win32_crt_test
 	./$(BUILD)/tests/win32_files_test
 	./$(BUILD)/tests/a64_c_test
 	./$(BUILD)/tests/a64_workload_test

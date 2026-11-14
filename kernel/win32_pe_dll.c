@@ -1,0 +1,331 @@
+#include "win32_pe_dll.h"
+
+/* Treat both file input and its PE metadata as untrusted. Nothing in this
+ * parser dereferences a guest-provided pointer as a host/kernel pointer.
+ * No executable bytes are invoked from the kernel. */
+#define DLL_MAX_SECTIONS 16u
+#define DLL_MAX_EXPORTS 256u
+static uint16_t rd16(const uint8_t *p) {
+    return (uint16_t)(p[0]|((uint16_t)p[1]<<8));
+}
+static uint32_t rd32(const uint8_t *p) {
+    return (uint32_t)p[0]|((uint32_t)p[1]<<8)|
+           ((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
+}
+static void wr32(uint8_t *p,uint32_t v) {
+    p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);
+    p[2]=(uint8_t)(v>>16);p[3]=(uint8_t)(v>>24);
+}
+static bool fits(size_t size,size_t offset,size_t count) {
+    return offset<=size && count<=size-offset;
+}
+static bool cstring(const uint8_t *m,size_t size,uint32_t rva,
+                    const char *name) {
+    if(!name || rva>=size)return false;
+    for(size_t i=0;i<128u;++i) {
+        if(!fits(size,rva+i,1u))return false;
+        char a=(char)m[rva+i],b=name[i];
+        if(a!=b)return false;
+        if(!a)return true;
+    }
+    return false;
+}
+static bool header(const uint8_t *f,size_t len,size_t *nt_out,
+                   size_t *opt_out,uint16_t *section_count) {
+    if(!f || len<64u || f[0]!='M' || f[1]!='Z')return false;
+    size_t nt=rd32(f+0x3cu);
+    if(nt<64u || !fits(len,nt,24u))return false;
+    if(f[nt]!='P' || f[nt+1]!='E' || f[nt+2] || f[nt+3])return false;
+    uint16_t sections=rd16(f+nt+6u),optional=rd16(f+nt+20u);
+    uint16_t flags=rd16(f+nt+22u);
+    if(rd16(f+nt+4u)!=0x014cu || !sections ||
+       sections>DLL_MAX_SECTIONS || optional<224u ||
+       !(flags&0x0002u) || !(flags&0x2000u) ||
+       !fits(len,nt+24u,optional))return false;
+    size_t opt=nt+24u;
+    uint16_t subsystem=rd16(f+opt+68u);
+    if(rd16(f+opt)!=0x010bu || rd32(f+opt+92u)<16u ||
+       (subsystem!=2u && subsystem!=3u))return false;
+    if(!fits(len,opt+optional,(size_t)sections*40u))return false;
+    *nt_out=nt;*opt_out=opt;*section_count=sections;
+    return true;
+}
+uint32_t win32_pe_dll_image_size(const uint8_t *file,size_t file_size) {
+    size_t nt,opt;uint16_t sections;
+    if(!file || file_size>WIN32_PE_DLL_MAX_BYTES ||
+       !header(file,file_size,&nt,&opt,&sections))return 0u;
+    uint32_t size=rd32(file+opt+56u);
+    if(size<4096u || size>WIN32_PE_DLL_MAX_BYTES)return 0u;
+    return size;
+}
+static bool rebase(uint8_t *m,uint32_t image_size,uint32_t preferred,
+                   uint32_t base,uint32_t rva,uint32_t length) {
+    if(preferred==base)return true;
+    if(!rva || length<8u || !fits(image_size,rva,length))return false;
+    size_t cursor=rva,end=(size_t)rva+length;
+    uint32_t delta=base-preferred;
+    while(cursor<end) {
+        if(!fits(end,cursor,8u))return false;
+        uint32_t page=rd32(m+cursor);
+        uint32_t bytes=rd32(m+cursor+4u);
+        if(bytes<8u || (bytes&1u) || !fits(end,cursor,bytes))return false;
+        for(uint32_t i=8u;i<bytes;i+=2u) {
+            uint16_t entry=rd16(m+cursor+i);
+            uint32_t type=entry>>12u;
+            if(type==0u)continue;
+            if(type!=3u)return false; /* HIGHLOW only */
+            uint64_t target=(uint64_t)page+(entry&0x0fffu);
+            if(target>image_size || !fits(image_size,(size_t)target,4u))
+                return false;
+            wr32(m+(size_t)target,rd32(m+(size_t)target)+delta);
+        }
+        cursor+=bytes;
+    }
+    return cursor==end;
+}
+static bool executable_rva(const uint8_t *m,uint32_t size,uint32_t rva) {
+    size_t nt,opt;uint16_t count;
+    if(!header(m,size,&nt,&opt,&count))return false;
+    size_t sections=opt+rd16(m+nt+20u);
+    for(uint32_t i=0;i<count;++i) {
+        const uint8_t *s=m+sections+i*40u;
+        uint32_t start=rd32(s+12u),n=rd32(s+8u),raw=rd32(s+16u);
+        if(raw>n)n=raw;
+        /* Executable entrypoints and exports must be backed by file bytes.
+         * A virtual-only section tail is zero-filled, not executable code. */
+        if((rd32(s+36u)&0x20000000u) &&
+           rva>=start && rva-start<raw && rva-start<n && rva<size)
+            return true;
+    }
+    return false;
+}
+bool win32_pe_dll_stage(const uint8_t *file,size_t file_size,
+                        uint8_t *dst,size_t capacity,
+                        uint32_t base,win32_pe_dll_info_t *out) {
+    if(out){out->image_size=0;out->guest_base=0;
+            out->export_rva=0;out->export_size=0;
+            out->import_rva=0;out->import_size=0;
+            out->entry_rva=0;}
+    size_t nt,opt;uint16_t count;
+    if(!out || !dst || file_size>WIN32_PE_DLL_MAX_BYTES ||
+       (base&4095u) ||
+       !header(file,file_size,&nt,&opt,&count))return false;
+    uint32_t size=rd32(file+opt+56u),headers=rd32(file+opt+60u);
+    size_t section_table=opt+rd16(file+nt+20u);
+    /* The mapped image must not wrap the 32-bit guest address space. */
+    if((uint64_t)base+(uint64_t)size>0x100000000ULL ||
+       size<4096u || size>WIN32_PE_DLL_MAX_BYTES || size>capacity ||
+       headers<section_table+count*40u ||
+       !fits(file_size,0u,headers) || headers>size)return false;
+    uint32_t exp=rd32(file+opt+96u),exp_size=rd32(file+opt+100u);
+    uint32_t reloc=rd32(file+opt+96u+5u*8u);
+    uint32_t reloc_size=rd32(file+opt+100u+5u*8u);
+    /* A DLL's image can be mapped before import binding. No caller may
+     * invoke exports until win32_pe_dll_bind_imports succeeds. */
+    uint32_t imports=rd32(file+opt+104u);
+    uint32_t imports_size=rd32(file+opt+108u);
+    if((imports || imports_size) &&
+       (!imports || imports_size<20u ||
+        !fits(size,imports,imports_size)))return false;
+    if(rd32(file+opt+96u+9u*8u) ||
+       rd32(file+opt+96u+13u*8u) ||
+       !exp || exp_size<40u || !fits(size,exp,exp_size))
+        return false;
+    for(uint32_t i=0;i<count;++i) {
+        const uint8_t *s=file+section_table+i*40u;
+        uint32_t v=rd32(s+12u),n=rd32(s+8u);
+        uint32_t raw=rd32(s+16u),offset=rd32(s+20u);
+        if(raw>n)n=raw;
+        if(!n || v<headers || !fits(size,v,n) ||
+           !fits(file_size,offset,raw) ||
+           (raw && offset<headers))return false; /* raw sections cannot alias PE headers */
+        for(uint32_t j=0;j<i;++j) {
+            const uint8_t *other=file+section_table+j*40u;
+            uint32_t b=rd32(other+12u),bn=rd32(other+8u);
+            uint32_t br=rd32(other+16u);
+            if(br>bn)bn=br;
+            if(v<b+bn && b<v+n)return false;
+            /* Two distinct sections must not share file-backed bytes.
+             * Overlapping raw ranges make the image ambiguous and can
+             * hide code/data behind a second section mapping. */
+            uint32_t bo=rd32(other+20u);
+            if(raw && br && (uint64_t)offset<(uint64_t)bo+br &&
+               (uint64_t)bo<(uint64_t)offset+raw)return false;
+        }
+    }
+    for(size_t i=0;i<capacity;++i)dst[i]=0;
+    for(size_t i=0;i<headers;++i)dst[i]=file[i];
+    for(uint32_t i=0;i<count;++i) {
+        const uint8_t *s=file+section_table+i*40u;
+        uint32_t v=rd32(s+12u),raw=rd32(s+16u),offset=rd32(s+20u);
+        for(uint32_t j=0;j<raw;++j)dst[v+j]=file[offset+j];
+    }
+    if(!rebase(dst,size,rd32(file+opt+28u),base,reloc,reloc_size))
+        return false;
+    const uint8_t *exports=dst+exp;
+    uint32_t num_functions=rd32(exports+20u);
+    uint32_t num_names=rd32(exports+24u);
+    uint32_t funcs=rd32(exports+28u);
+    uint32_t names=rd32(exports+32u);
+    uint32_t ordinals=rd32(exports+36u);
+    if(!num_functions || num_functions>DLL_MAX_EXPORTS ||
+       num_names>DLL_MAX_EXPORTS ||
+       !fits(size,funcs,(size_t)num_functions*4u) ||
+       !fits(size,names,(size_t)num_names*4u) ||
+       !fits(size,ordinals,(size_t)num_names*2u))return false;
+    for(uint32_t i=0;i<num_names;++i) {
+        uint32_t n=rd32(dst+names+i*4u);
+        if(n>=size || rd16(dst+ordinals+i*2u)>=num_functions)
+            return false;
+        bool terminated=false;
+        for(uint32_t j=0;j<128u && (size_t)n+j<size;++j)
+            if(dst[n+j]==0u){terminated=j!=0u;break;}
+        if(!terminated)return false;
+    }
+    out->image_size=size;
+    out->guest_base=base;
+    out->export_rva=exp;
+    out->export_size=exp_size;
+    out->import_rva=imports;
+    out->import_size=imports_size;
+    out->entry_rva=rd32(file+opt+16u);
+    if(out->entry_rva && !executable_rva(dst,size,out->entry_rva)) {
+        out->entry_rva=0u;out->image_size=0u;
+        return false;
+    }
+    return true;
+}
+/* Read PE ASCII names with a strict bound. Even imported names are copied
+ * into kernel-owned, bounded buffers before passing to the resolver. */
+static bool read_import_string(const uint8_t *m,uint32_t bytes,uint32_t rva,
+                               char out[65]) {
+    if(!rva || rva>=bytes)return false;
+    for(uint32_t i=0;i<64u;++i) {
+        if(!fits(bytes,(size_t)rva+i,1u))return false;
+        uint8_t c=m[rva+i];
+        if(c==0u){out[i]=0;return i!=0u;}
+        if(c<33u || c>126u)return false;
+        out[i]=(char)c;
+    }
+    out[64]=0;
+    return false;
+}
+bool win32_pe_dll_bind_imports(uint8_t *m,
+    const win32_pe_dll_info_t *info,
+    win32_pe_dll_import_lookup_t lookup,void *context) {
+    if(!m || !info || !info->image_size)return false;
+    if(!info->import_rva && !info->import_size)return true;
+    uint32_t size=info->image_size,offset=info->import_rva;
+    if(!lookup || info->import_size<20u ||
+       !fits(size,offset,info->import_size))return false;
+    /* Bind atomically: a missing dependency must never leave a partly
+     * rewritten IAT that could be mistaken for a successfully bound DLL. */
+    uint32_t patch_rvas[256],patch_values[256];
+    /* The PE data-directory size may include padding or adjacent thunk
+     * arrays in ordinary compiler output. Protect the actual descriptor
+     * records (including the terminator), not the entire declared span. */
+    size_t descriptor_end=0u;
+    for(size_t pos=offset;
+        fits((size_t)offset+info->import_size,pos,20u);
+        pos+=20u) {
+        const uint8_t *d=m+pos;
+        if(!rd32(d) && !rd32(d+4u) && !rd32(d+8u) &&
+           !rd32(d+12u) && !rd32(d+16u)) {
+            descriptor_end=pos+20u;
+            break;
+        }
+        if((pos-offset)/20u>=16u)return false;
+    }
+    if(!descriptor_end)return false;
+    uint32_t descriptors=0u,functions=0u;
+    for(size_t cursor=offset;
+        fits((size_t)offset+info->import_size,cursor,20u);
+        cursor+=20u) {
+        const uint8_t *d=m+cursor;
+        uint32_t oft=rd32(d),stamp=rd32(d+4u);
+        uint32_t chain=rd32(d+8u),name_rva=rd32(d+12u);
+        uint32_t iat=rd32(d+16u);
+        if(!oft && !stamp && !chain && !name_rva && !iat) {
+            for(uint32_t i=0;i<functions;++i)
+                wr32(m+patch_rvas[i],patch_values[i]);
+            return true; /* mandatory all-zero terminator */
+        }
+        if(++descriptors>16u || !name_rva || !iat ||
+           !fits(size,iat,4u) || (oft && !fits(size,oft,4u)))
+            return false;
+        char dll_name[65];
+        if(!read_import_string(m,size,name_rva,dll_name))return false;
+        uint32_t lookup_rva=oft?oft:iat;
+        bool terminated=false;
+        for(uint32_t i=0u;i<256u && functions<256u;++i) {
+            uint64_t thunk=(uint64_t)lookup_rva+(uint64_t)i*4u;
+            uint64_t dest=(uint64_t)iat+(uint64_t)i*4u;
+            if(thunk>size || dest>size ||
+               !fits(size,(size_t)thunk,4u) ||
+               !fits(size,(size_t)dest,4u))return false;
+            uint32_t raw=rd32(m+(size_t)thunk);
+            if(!raw){terminated=true;break;}
+            char proc[65];
+            const char *symbol=NULLPTR;
+            uint32_t ordinal=0u;
+            if(raw&0x80000000u) {
+                if(raw&0x7fff0000u)return false;
+                ordinal=raw&0xffffu;
+            } else {
+                if(raw>size || !fits(size,raw,3u) ||
+                   !read_import_string(m,size,raw+2u,proc))return false;
+                symbol=proc;
+            }
+            /* Binding must never overwrite import descriptors: they are
+             * loader metadata, not writable IAT storage. */
+            if(dest<(uint64_t)descriptor_end &&
+               (uint64_t)offset<dest+4u)return false;
+            uint32_t address=lookup(context,dll_name,symbol,ordinal);
+            if(!address)return false;
+            /* A malformed descriptor chain must not bind the same IAT
+             * slot twice (possibly to different resolved functions). */
+            for(uint32_t prior=0u;prior<functions;++prior)
+                if((uint64_t)patch_rvas[prior]<dest+4u &&
+                   dest<(uint64_t)patch_rvas[prior]+4u)return false;
+            patch_rvas[functions]=(uint32_t)dest;
+            patch_values[functions]=address;
+            ++functions;
+        }
+        if(!terminated)return false;
+    }
+    return false; /* descriptor array has no terminating entry */
+}
+uint32_t win32_pe_dll_resolve(const uint8_t *image,
+                             const win32_pe_dll_info_t *info,
+                             const char *name,uint32_t ordinal) {
+    if(!image || !info || !info->image_size ||
+       !fits(info->image_size,info->export_rva,40u))return 0u;
+    const uint8_t *e=image+info->export_rva;
+    uint32_t base_ord=rd32(e+16u),nfunc=rd32(e+20u);
+    uint32_t nnames=rd32(e+24u),funcs=rd32(e+28u);
+    uint32_t names=rd32(e+32u),ords=rd32(e+36u);
+    if(nfunc==0 || nfunc>DLL_MAX_EXPORTS || nnames>DLL_MAX_EXPORTS ||
+       !fits(info->image_size,funcs,(size_t)nfunc*4u) ||
+       !fits(info->image_size,names,(size_t)nnames*4u) ||
+       !fits(info->image_size,ords,(size_t)nnames*2u))return 0u;
+    uint32_t index=UINT32_MAX;
+    if(name) {
+        for(uint32_t i=0;i<nnames;++i) {
+            uint32_t rva=rd32(image+names+i*4u);
+            if(cstring(image,info->image_size,rva,name)) {
+                index=rd16(image+ords+i*2u);
+                break;
+            }
+        }
+    } else if(ordinal>=base_ord && ordinal-base_ord<nfunc) {
+        index=ordinal-base_ord;
+    }
+    if(index>=nfunc)return 0u;
+    uint32_t target=rd32(image+funcs+index*4u);
+    if(!target || target>=info->image_size ||
+       (target>=info->export_rva &&
+        (uint64_t)target<(uint64_t)info->export_rva+info->export_size) ||
+       !executable_rva(image,info->image_size,target))
+        return 0u;
+    return info->guest_base+target;
+}
