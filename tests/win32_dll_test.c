@@ -178,6 +178,23 @@ int main(void) {
     win32_vm_t vm;
     win32_vm_init(&vm,guest,BASE,BYTES);
     win32_dll_set_reader(&dll,&vm,NULL,NULL);
+    /* Import metadata must never authorize reads beyond actual guest
+     * storage, even when its claimed image size is below the PE cap. */
+    uint32_t bound=0xdeadbeefu;
+    assert(!win32_dll_bind_exe_imports(&dll,BYTES+1u,0u,0u,&bound));
+    assert(bound==0u);
+    win32_vm_t short_vm;
+    win32_vm_init(&short_vm,guest,BASE,BYTES/2u);
+    win32_dll_set_reader(&dll,&short_vm,NULL,NULL);
+    bound=0xdeadbeefu;
+    assert(!win32_dll_bind_exe_imports(&dll,BYTES/2u+1u,0u,0u,&bound));
+    assert(bound==0u);
+    win32_dll_set_reader(&dll,&vm,NULL,NULL);
+    dll.base=BASE+0x1000u;
+    bound=0xdeadbeefu;
+    assert(!win32_dll_bind_exe_imports(&dll,0x2000u,0u,0u,&bound));
+    assert(bound==0u);
+    dll.base=BASE;
     dll.images[0].info.guest_base=BASE+0x191000u;
     assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
     assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
