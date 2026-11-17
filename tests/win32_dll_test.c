@@ -198,6 +198,21 @@ int main(void) {
     dll.images[0].info.guest_base=BASE+0x191000u;
     assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
     assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    /* Export lookups must use the same backing memory and base as the
+     * process DLL context, not merely a VM mapping that looks in range. */
+    dll.images[0].info.guest_base=dll.images[0].handle;
+    dll.vm->base=BASE+0x1000u;
+    assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    dll.vm->base=BASE;
+    dll.vm->guest=guest+0x1000u;
+    assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    dll.vm->guest=guest;
+    dll.bytes=0x190000u;
+    assert(!win32_dll_symbol(&dll,dll.images[0].handle,BASE+0x2100u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    dll.bytes=BYTES;
     /* FreeLibrary must not pretend to run PROCESS_DETACH. The final
      * reference is retained for an initialized module with DllMain. */
     win32_dll_init(&dll,guest,BASE,BYTES);
