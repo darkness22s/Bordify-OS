@@ -213,6 +213,16 @@ int main(void) {
     assert(!win32_dll_bind_exe_imports(&dll,BYTES/2u+1u,0u,0u,&bound));
     assert(bound==0u);
     win32_dll_set_reader(&dll,&vm,NULL,NULL);
+    /* Binding imports must never patch a replacement VM backing store
+     * while the DLL context still refers to the original guest memory. */
+    vm.guest=guest+0x1000u;
+    bound=0xdeadbeefu;
+    assert(!win32_dll_bind_exe_imports(&dll,0x2000u,0u,0u,&bound));
+    assert(bound==0u);
+    vm.guest=guest;
+    bound=0xdeadbeefu;
+    assert(win32_dll_bind_exe_imports(&dll,0x2000u,0u,0u,&bound));
+    assert(bound==0u);
     dll.base=BASE+0x1000u;
     bound=0xdeadbeefu;
     assert(!win32_dll_bind_exe_imports(&dll,0x2000u,0u,0u,&bound));
