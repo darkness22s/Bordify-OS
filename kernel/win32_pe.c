@@ -13,8 +13,8 @@
  * no imported Windows instruction runs at CPL0.
  */
 #define MAX_SECTIONS 16
-#define MAX_IMPORTS 32
-#define BRIDGE_SLOT 64u
+#define MAX_IMPORTS 256
+#define BRIDGE_SLOT WIN32_PE_BRIDGE_SLOT
 
 static uint16_t rd16(const uint8_t *p) {
     return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
@@ -55,7 +55,19 @@ static bool name_in_image(const uint8_t *image, uint32_t image_size,
                     allowed < 48 ? allowed : 48);
 }
 static uint32_t bridge_address(const uint8_t *image, uint32_t size,
-                               uint32_t name_rva) {
+                               uint32_t name_rva,uint32_t dll) {
+    uint32_t base=WIN32_PE_USER_BASE+WIN32_PE_RUNTIME_OFFSET;
+    if(dll==2u) {
+        static const char *const crt_exports[]={
+            "strlen","memcpy","memset","memcmp","strcmp","strncmp",
+            "malloc","free","calloc","memmove","realloc"
+        };
+        for(uint32_t i=0;i<11u;++i)
+            if(name_in_image(image,size,name_rva,crt_exports[i]))
+                return base+(16u+i)*BRIDGE_SLOT;
+        return 0;
+    }
+    if(dll!=1u) return 0;
     if (name_in_image(image, size, name_rva, "ExitProcess"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET;
     if (name_in_image(image, size, name_rva, "GetStdHandle"))
@@ -70,21 +82,58 @@ static uint32_t bridge_address(const uint8_t *image, uint32_t size,
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 5u;
     if (name_in_image(image,size,name_rva,"CloseHandle"))
         return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 6u;
+    /* Ordinary Windows process metadata functions, not Chrome-specific. */
+    if (name_in_image(image,size,name_rva,"GetCurrentProcessId"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 7u;
+    if (name_in_image(image,size,name_rva,"GetCurrentThreadId"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 8u;
+    if (name_in_image(image,size,name_rva,"GetTickCount"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 9u;
+    if (name_in_image(image,size,name_rva,"GetModuleHandleA"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 10u;
+    if (name_in_image(image,size,name_rva,"GetModuleHandleW"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 11u;
+    if (name_in_image(image,size,name_rva,"GetCommandLineA"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 12u;
+    if (name_in_image(image,size,name_rva,"GetCommandLineW"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 13u;
+    if (name_in_image(image,size,name_rva,"SetLastError"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 14u;
+    if (name_in_image(image,size,name_rva,"IsDebuggerPresent"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 15u;
+    if (name_in_image(image,size,name_rva,"VirtualAlloc"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 27u;
+    if (name_in_image(image,size,name_rva,"VirtualFree"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 28u;
+    if (name_in_image(image,size,name_rva,"LoadLibraryA"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 29u;
+    if (name_in_image(image,size,name_rva,"GetProcAddress"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 30u;
+    if (name_in_image(image,size,name_rva,"FreeLibrary"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 31u;
+    if (name_in_image(image,size,name_rva,"LoadLibraryW"))
+        return WIN32_PE_USER_BASE + WIN32_PE_RUNTIME_OFFSET + BRIDGE_SLOT * 32u;
     return 0;
 }
 
 static bool fix_imports(uint8_t *memory, uint32_t image_size,
                         uint32_t import_rva, uint32_t import_size,
-                        uint32_t *count) {
+                        uint32_t *count,uint32_t *modules,
+                        uint32_t *reason) {
     *count = 0;
+    *modules = 0;
     /* An import-free EXE can be admitted, but the Win32 demo uses kernel32. */
     if (import_rva == 0 && import_size == 0) return true;
     if (!import_rva || !import_size ||
         !fits(image_size, import_rva, import_size) ||
         import_size < 40) return false;
 
-    uint32_t descriptors = import_size / 20u;
-    if (descriptors > 16) return false;
+    /* IMAGE_DIRECTORY_ENTRY_IMPORT.Size can encompass the complete
+     * import data blob (descriptors, ILT, IAT and name strings). It is
+     * not a descriptor count. Scan no more than 64 descriptors, requiring
+     * a fully zeroed terminator before that security limit. */
+    uint32_t descriptors=import_size/20u;
+    if (descriptors>64u) descriptors=64u;
     bool terminated = false;
     for (uint32_t i = 0; i < descriptors; ++i) {
         uint32_t desc = import_rva + i * 20u;
@@ -95,8 +144,19 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
             terminated = true;
             break;
         }
-        if (!name_in_image(memory, image_size, name, "kernel32.dll") ||
-            !lookup || !iat) return false;
+        uint32_t dll=0;
+        if(name_in_image(memory,image_size,name,"kernel32.dll")) dll=1;
+        else if(name_in_image(memory,image_size,name,"msvcrt.dll")) dll=2;
+        else {
+            *reason=WIN32_PE_UNSUPPORTED_DLL;
+            return false;
+        }
+        *modules|=1u<<(dll-1u);
+        /* IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk may legally be zero.
+         * In that case the loader reads import names from FirstThunk
+         * before rewriting the IAT, exactly as PE/COFF specifies. */
+        if (!iat) return false;
+        if (!lookup) lookup=iat;
 
         bool found_end = false;
         for (uint32_t j = 0; j < MAX_IMPORTS; ++j) {
@@ -107,8 +167,11 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
             if (value == 0) { found_end = true; break; }
             if (value & 0x80000000u) return false; /* ordinal imports omitted */
             if (!fits(image_size, value, 3)) return false;
-            uint32_t address = bridge_address(memory, image_size, value + 2u);
-            if (!address) return false; /* missing Win32 API */
+            uint32_t address=bridge_address(memory,image_size,value+2u,dll);
+            if (!address) {
+                *reason=WIN32_PE_UNSUPPORTED_API;
+                return false;
+            }
             wr32(memory + iat + delta, address);
             ++*count;
         }
@@ -117,32 +180,109 @@ static bool fix_imports(uint8_t *memory, uint32_t image_size,
     return terminated;
 }
 
-bool win32_pe_stage(const uint8_t *file, size_t file_size,
-                    uint8_t *memory, size_t memory_size,
-                    win32_pe_info_t *info) {
-    if (!file || !memory || !info || memory_size < WIN32_PE_MAX_IMAGE) return false;
+/* Standard PE32 IMAGE_BASE_RELOCATION / IMAGE_REL_BASED_HIGHLOW.
+ * Maps a legitimate preferred Windows image base into the isolated
+ * Bordify user address range, without executing any code at ring 0.
+ * No unbounded reloc block traversal, unknown relocation types or TLS.
+ */
+static bool apply_pe32_relocations(uint8_t *memory,uint32_t image_size,
+                                   uint32_t base,uint32_t reloc_rva,
+                                   uint32_t reloc_size) {
+    if (base==WIN32_PE_USER_BASE) return true;
+    if (!reloc_rva || reloc_size<8 ||
+        !fits(image_size,reloc_rva,reloc_size)) return false;
+    size_t end=(size_t)reloc_rva+reloc_size;
+    size_t cursor=reloc_rva;
+    uint32_t delta=WIN32_PE_USER_BASE-base; /* uint32 modulo arithmetic */
+    while(cursor<end) {
+        if (!fits(end,cursor,8)) return false;
+        uint32_t page=rd32(memory+cursor);
+        uint32_t block=rd32(memory+cursor+4);
+        if (block<8 || (block&1u) || block>end-cursor)
+            return false;
+        for(uint32_t at=8;at<block;at+=2) {
+            uint16_t entry=rd16(memory+cursor+at);
+            unsigned type=(entry>>12)&15u;
+            if(type==0u) continue; /* IMAGE_REL_BASED_ABSOLUTE padding */
+            if(type!=3u) return false; /* unsupported relocated width */
+            uint64_t where=(uint64_t)page+(entry&0x0fffu);
+            if(where>image_size || 4u>image_size-(size_t)where)
+                return false;
+            uint32_t old=rd32(memory+(size_t)where);
+            wr32(memory+(size_t)where,old+delta);
+        }
+        cursor+=block;
+    }
+    return cursor==end;
+}
+
+static bool rejected(win32_pe_info_t *info,uint32_t reason) {
+    if (info) info->reject_reason=reason;
+    return false;
+}
+const char *win32_pe_reason_name(uint32_t code) {
+    switch (code) {
+        case WIN32_PE_OK: return "ready";
+        case WIN32_PE_BAD_ARGUMENT: return "invalid loader arguments";
+        case WIN32_PE_BAD_DOS: return "invalid DOS/MZ header";
+        case WIN32_PE_BAD_NT: return "invalid PE/COFF signature";
+        case WIN32_PE_BAD_ARCH: return "unsupported PE architecture/sections";
+        case WIN32_PE_BAD_SUBSYSTEM: return "unsupported subsystem/PE32 options";
+        case WIN32_PE_RELOCS_STRIPPED: return "non-rebasable PE32 image";
+        case WIN32_PE_UNSUPPORTED_TLS: return "TLS/delay-load not implemented";
+        case WIN32_PE_BAD_IMAGE_SIZE: return "invalid/oversized PE image";
+        case WIN32_PE_BAD_SECTION_TABLE: return "invalid section header table";
+        case WIN32_PE_BAD_SECTION: return "invalid PE32 section extent";
+        case WIN32_PE_OVERLAPPING_SECTIONS: return "overlapping PE32 sections";
+        case WIN32_PE_ENTRY_NOT_EXECUTABLE: return "non-executable entry RVA";
+        case WIN32_PE_BAD_RELOCATIONS: return "unsupported/malformed base relocations";
+        case WIN32_PE_BAD_IMPORTS: return "malformed import directory";
+        case WIN32_PE_UNSUPPORTED_DLL: return "unsupported imported DLL";
+        case WIN32_PE_UNSUPPORTED_API: return "unsupported imported API";
+        default: return "unknown PE32 rejection";
+    }
+}
+
+static bool stage_core(const uint8_t *file, size_t file_size,
+                       uint8_t *memory, size_t memory_size,
+                       win32_pe_info_t *info,bool defer_imports) {
+    if (!file || !memory || !info || memory_size < WIN32_PE_MAX_IMAGE)
+        return rejected(info,WIN32_PE_BAD_ARGUMENT);
     info->entry = 0;
     info->image_size = 0;
     info->imported_functions = 0;
+    info->imported_module_mask = 0;
+    info->import_rva = 0;
+    info->import_size = 0;
+    info->reject_reason = WIN32_PE_OK;
 
     if (!fits(file_size, 0, 64) || file[0] != 'M' || file[1] != 'Z')
-        return false;
+        return rejected(info,WIN32_PE_BAD_DOS);
     size_t nt = rd32(file + 0x3c);
-    if (nt < 64 || !fits(file_size, nt, 24)) return false;
+    if (nt < 64 || !fits(file_size, nt, 24))
+        return rejected(info,WIN32_PE_BAD_NT);
     if (file[nt] != 'P' || file[nt + 1] != 'E' ||
-        file[nt + 2] || file[nt + 3]) return false;
+        file[nt + 2] || file[nt + 3])
+        return rejected(info,WIN32_PE_BAD_NT);
     uint16_t machine = rd16(file + nt + 4);
     uint16_t section_count = rd16(file + nt + 6);
     uint16_t optional_size = rd16(file + nt + 20);
     uint16_t flags = rd16(file + nt + 22);
     if (machine != 0x014c || section_count == 0 ||
         section_count > MAX_SECTIONS || optional_size < 224 ||
-        !(flags & 0x0002) || !fits(file_size, nt + 24, optional_size)) return false;
+        !(flags & 0x0002) || !fits(file_size, nt + 24, optional_size))
+        return rejected(info,WIN32_PE_BAD_ARCH);
 
     size_t opt = nt + 24;
-    if (rd16(file + opt) != 0x010b || rd32(file + opt + 28) != WIN32_PE_USER_BASE ||
+    if (rd16(file + opt) != 0x010b ||
         rd16(file + opt + 68) != 3 || /* IMAGE_SUBSYSTEM_WINDOWS_CUI */
-        rd32(file + opt + 92) < 16) return false;
+        rd32(file + opt + 92) < 16)
+        return rejected(info,WIN32_PE_BAD_SUBSYSTEM);
+    uint32_t image_base=rd32(file+opt+28);
+    uint32_t reloc_rva=rd32(file+opt+96+5u*8u);
+    uint32_t reloc_size=rd32(file+opt+96+5u*8u+4u);
+    if (image_base!=WIN32_PE_USER_BASE && (flags&0x0001u))
+        return rejected(info,WIN32_PE_RELOCS_STRIPPED);
     uint32_t entry_rva = rd32(file + opt + 16);
     uint32_t image_size = rd32(file + opt + 56);
     uint32_t headers_size = rd32(file + opt + 60);
@@ -150,16 +290,18 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
     uint32_t import_size = rd32(file + opt + 108);
     /* Reject TLS and delayed imports until those loaders exist. */
     if (rd32(file + opt + 96 + 9u * 8u) ||
-        rd32(file + opt + 96 + 13u * 8u)) return false;
+        rd32(file + opt + 96 + 13u * 8u))
+        return rejected(info,WIN32_PE_UNSUPPORTED_TLS);
     if (image_size < 0x2000 || image_size > WIN32_PE_MAX_IMAGE ||
         !entry_rva || entry_rva >= image_size ||
         headers_size < opt + optional_size || headers_size > image_size ||
-        !fits(file_size, 0, headers_size)) return false;
+        !fits(file_size, 0, headers_size))
+        return rejected(info,WIN32_PE_BAD_IMAGE_SIZE);
 
     size_t sections = opt + optional_size;
     if (!fits(file_size, sections, (size_t)section_count * 40u) ||
         !fits(headers_size, sections, (size_t)section_count * 40u))
-        return false;
+        return rejected(info,WIN32_PE_BAD_SECTION_TABLE);
     bool executable_entry = false;
 
     /* Validate complete mapping before copying untrusted sections. */
@@ -173,7 +315,8 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
         uint32_t mapped_size = virtual_size > raw_size ? virtual_size : raw_size;
         if (!mapped_size || !fits(image_size, virtual_rva, mapped_size) ||
             virtual_rva < headers_size ||
-            !fits(file_size, raw_offset, raw_size)) return false;
+            !fits(file_size, raw_offset, raw_size))
+            return rejected(info,WIN32_PE_BAD_SECTION);
         if ((characteristics & 0x20000000u) &&
             entry_rva >= virtual_rva &&
             entry_rva - virtual_rva < mapped_size) executable_entry = true;
@@ -184,10 +327,11 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
             uint32_t r = rd32(prev + 16);
             if (r > n) n = r;
             if (virtual_rva < v + n && v < virtual_rva + mapped_size)
-                return false;
+                return rejected(info,WIN32_PE_OVERLAPPING_SECTIONS);
         }
     }
-    if (!executable_entry) return false;
+    if (!executable_entry)
+        return rejected(info,WIN32_PE_ENTRY_NOT_EXECUTABLE);
 
     clear_bytes(memory, memory_size);
     copy_bytes(memory, file, headers_size);
@@ -199,17 +343,45 @@ bool win32_pe_stage(const uint8_t *file, size_t file_size,
         copy_bytes(memory + virtual_rva, file + raw_offset, raw_size);
     }
 
+    if (!apply_pe32_relocations(memory,image_size,image_base,
+                                reloc_rva,reloc_size))
+        return rejected(info,WIN32_PE_BAD_RELOCATIONS);
     uint32_t imported = 0;
-    if (!fix_imports(memory, image_size, import_rva, import_size, &imported))
-        return false;
+    uint32_t imported_modules = 0;
+    uint32_t why=WIN32_PE_BAD_IMPORTS;
+    if(defer_imports) {
+        /* The shared bounded import binder must run before entrypoint.
+         * Keep original INT/IAT contents (including FirstThunk-only images)
+         * intact until actual virtual/real DLL modules are available. */
+        if((import_rva || import_size) &&
+           (!import_rva || import_size<20u ||
+            !fits(image_size,import_rva,import_size)))
+            return rejected(info,WIN32_PE_BAD_IMPORTS);
+    } else if (!fix_imports(memory, image_size, import_rva, import_size,
+                            &imported,&imported_modules,&why))
+        return rejected(info,why);
     info->entry = WIN32_PE_USER_BASE + entry_rva;
     info->image_size = image_size;
     info->imported_functions = imported;
+    info->imported_module_mask = imported_modules;
+    info->import_rva=import_rva;
+    info->import_size=import_size;
     return true;
+}
+bool win32_pe_stage(const uint8_t *file,size_t file_size,
+                    uint8_t *memory,size_t memory_size,
+                    win32_pe_info_t *info) {
+    return stage_core(file,file_size,memory,memory_size,info,false);
+}
+bool win32_pe_stage_deferred(const uint8_t *file,size_t file_size,
+                             uint8_t *memory,size_t memory_size,
+                             win32_pe_info_t *info) {
+    return stage_core(file,file_size,memory,memory_size,info,true);
 }
 
 bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
-    if (!memory || !fits(size,WIN32_PE_RUNTIME_OFFSET,BRIDGE_SLOT*7u))
+    if (!memory || !fits(size,WIN32_PE_RUNTIME_OFFSET,
+                           BRIDGE_SLOT*WIN32_PE_BRIDGE_COUNT))
         return false;
     /* Tiny x86 stdcall stubs assembled and inspected for exact calling
      * conventions. Every syscall is invoked from the guest's ring-3
@@ -257,20 +429,152 @@ bool win32_pe_install_bridges(uint8_t *memory, size_t size) {
         0x53,0x8b,0x5c,0x24,0x08,0xb8,0x06,0,0,0,
         0xcd,0x80,0x5b,0xc2,0x04,0
     };
-    static const uint8_t *const code[7]={
-        exit_process,get_std_handle,write_file,get_last_error,
-        create_file,read_file,close_handle
+    /* Existing services remain at their original indices so all older
+     * independently tested PE32 samples are still byte-for-byte compatible.
+     * x86 stdcall: GetModuleHandle(NULL) returns this process image base;
+     * GetCommandLineA/W return process-private storage, never kernel data. */
+    static const uint8_t constant_one[]={0xb8,1,0,0,0,0xc3};
+    static const uint8_t get_tick_count[]={
+        0xb8,8,0,0,0,0xcd,0x80,0xc3
     };
-    static const size_t lengths[7]={
+    /* Named GetModuleHandle does not increment dynamic reference counts. */
+    static const uint8_t get_module_handle_a[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,26,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t get_module_handle_w[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,27,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t get_command_line[]={
+        0xb8,0,0,0,0,0xc3           /* mov eax,process-owned pointer; ret */
+    };
+    static const uint8_t set_last_error[]={
+        0x8b,0x5c,0x24,0x04,        /* mov ebx,[esp+4] */
+        0xb8,9,0,0,0,0xcd,0x80,   /* int 0x80 / case 9 */
+        0xc2,0x04,0               /* ret 4 */
+    };
+    static const uint8_t false_value[]={0x31,0xc0,0xc3};
+    /* Pure C cdecl uses caller stack cleanup. Preserve EBX and forward
+     * up to 3 arguments into the guest-only int 0x80 syscall envelope.
+     * The service number is patched once per 64-byte stub at offset 13.
+     *
+     * push ebx
+     * mov ebx,[esp+8]; mov ecx,[esp+12]; mov edx,[esp+16]
+     * mov eax,service; int 0x80; pop ebx; ret
+     */
+    static const uint8_t crt_bridge[]={
+        0x53,0x8b,0x5c,0x24,0x08,
+        0x8b,0x4c,0x24,0x0c,
+        0x8b,0x54,0x24,0x10,
+        0xb8,0,0,0,0,
+        0xcd,0x80,0x5b,0xc3
+    };
+    /* All syscall parameters are read from a validated user stack pointer
+     * passed in EBX. The stubs preserve EBX (callee-saved on x86).
+     * VirtualAlloc has four stdcall parameters; VirtualFree has three. */
+    static const uint8_t virtual_alloc[]={
+        0x53,0x8d,0x5c,0x24,0x08,0xb8,21,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x10,0
+    };
+    static const uint8_t virtual_free[]={
+        0x53,0x8d,0x5c,0x24,0x08,0xb8,22,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x0c,0
+    };
+    static const uint8_t load_library_a[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,23,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t get_proc_address[]={
+        0x53,0x8d,0x5c,0x24,0x08,0xb8,24,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x08,0
+    };
+    static const uint8_t free_library[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,25,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t load_library_w[]={
+        0x53,0x8b,0x5c,0x24,0x08,0xb8,28,0,0,0,
+        0xcd,0x80,0x5b,0xc2,0x04,0
+    };
+    static const uint8_t *const code[WIN32_PE_BRIDGE_COUNT]={
+        exit_process,get_std_handle,write_file,get_last_error,
+        create_file,read_file,close_handle,
+        constant_one,constant_one,get_tick_count,
+        get_module_handle_a,get_module_handle_w,
+        get_command_line,get_command_line,set_last_error,false_value,
+        crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
+        crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,crt_bridge,
+        virtual_alloc,virtual_free,
+        load_library_a,get_proc_address,free_library,load_library_w,
+        crt_bridge,crt_bridge
+    };
+    static const size_t lengths[WIN32_PE_BRIDGE_COUNT]={
         sizeof(exit_process),sizeof(get_std_handle),
         sizeof(write_file),sizeof(get_last_error),
-        sizeof(create_file),sizeof(read_file),sizeof(close_handle)
+        sizeof(create_file),sizeof(read_file),sizeof(close_handle),
+        sizeof(constant_one),sizeof(constant_one),sizeof(get_tick_count),
+        sizeof(get_module_handle_a),sizeof(get_module_handle_w),
+        sizeof(get_command_line),sizeof(get_command_line),
+        sizeof(set_last_error),sizeof(false_value),
+        sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(crt_bridge),sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(crt_bridge),sizeof(crt_bridge),
+        sizeof(virtual_alloc),sizeof(virtual_free),
+        sizeof(load_library_a),sizeof(get_proc_address),sizeof(free_library),
+        sizeof(load_library_w),sizeof(crt_bridge),sizeof(crt_bridge)
     };
-    for(size_t i=0;i<7;++i){
+    if (!fits(size,WIN32_PE_CMDLINE_W_OFFSET,WIN32_PE_CMDLINE_LIMIT*2u))
+        return false;
+    for(size_t i=0;i<WIN32_PE_BRIDGE_COUNT;++i){
         if(lengths[i]>BRIDGE_SLOT) return false;
         uint8_t *dest=memory+WIN32_PE_RUNTIME_OFFSET+i*BRIDGE_SLOT;
         clear_bytes(dest,BRIDGE_SLOT);
         copy_bytes(dest,code[i],lengths[i]);
+        if(i>=16u && i<27u) dest[14u]=(uint8_t)(10u+i-16u);
+        if(i==33u) dest[14u]=30u;
+        if(i==34u) dest[14u]=31u;
+    }
+    uint8_t *stubs=memory+WIN32_PE_RUNTIME_OFFSET;
+    wr32(stubs+12u*BRIDGE_SLOT+1u,
+         WIN32_PE_USER_BASE+WIN32_PE_CMDLINE_A_OFFSET);
+    wr32(stubs+13u*BRIDGE_SLOT+1u,
+         WIN32_PE_USER_BASE+WIN32_PE_CMDLINE_W_OFFSET);
+    return true;
+}
+
+/* A process's command line is isolated user data at a fixed, guarded
+ * runtime-owned offset, never a pointer into the kernel or the host.
+ * Only simple DOS 8.3 filenames are currently supported; arbitrary
+ * quoting, arguments and Unicode filesystem names need a real loader. */
+bool win32_pe_set_command_line(uint8_t *memory,size_t memory_size,
+                               const char *exe_name) {
+    static const char prefix[]="\"C:\\BORDIFY\\APPS\\";
+    if (!memory || !exe_name ||
+        !fits(memory_size,WIN32_PE_CMDLINE_A_OFFSET,WIN32_PE_CMDLINE_LIMIT) ||
+        !fits(memory_size,WIN32_PE_CMDLINE_W_OFFSET,
+              WIN32_PE_CMDLINE_LIMIT*2u))
+        return false;
+    char line[WIN32_PE_CMDLINE_LIMIT];
+    size_t n=0;
+    for(size_t i=0;i<sizeof(prefix)-1u;++i)line[n++]=prefix[i];
+    size_t name_length=0;
+    for(;exe_name[name_length] && name_length<12u;++name_length) {
+        unsigned char ch=(unsigned char)exe_name[name_length];
+        if (!((ch>='A' && ch<='Z') || (ch>='a' && ch<='z') ||
+              (ch>='0' && ch<='9') || ch=='.' || ch=='_' || ch=='-'))
+            return false;
+        line[n++]=(char)ch;
+    }
+    if (name_length==0u || exe_name[name_length] || n+2u>sizeof(line))
+        return false;
+    line[n++]='"';
+    line[n]=0;
+    for(size_t i=0;i<=n;++i) {
+        memory[WIN32_PE_CMDLINE_A_OFFSET+i]=(uint8_t)line[i];
+        memory[WIN32_PE_CMDLINE_W_OFFSET+2u*i]=(uint8_t)line[i];
+        memory[WIN32_PE_CMDLINE_W_OFFSET+2u*i+1u]=0;
     }
     return true;
 }

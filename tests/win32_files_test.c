@@ -5,7 +5,7 @@
 #include "win32_pe.h"
 #include "win32_files.h"
 
-static uint8_t memory[256*1024];
+static uint8_t memory[4u * 1024u * 1024u];
 static uint8_t persisted[1024];
 static size_t persisted_count;
 static bool persisted_exists;
