@@ -310,6 +310,22 @@ int main(void) {
     win32_dll_init(&dll,guest,BASE,BYTES);
     win32_vm_init(&vm,guest,BASE,BYTES);
     win32_dll_set_reader(&dll,&vm,no_file,NULL);
+    /* A real DLL load must reject a stale VM before touching its guest
+     * backing memory or invoking the file reader. */
+    vm.guest=guest+0x1000u;
+    assert(!win32_dll_load(&dll,BASE+0x2400u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    vm.guest=guest;
+    vm.base=BASE+0x1000u;
+    assert(!win32_dll_load(&dll,BASE+0x2400u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    vm.base=BASE;
+    vm.bytes=BYTES-1u;
+    assert(!win32_dll_load(&dll,BASE+0x2400u));
+    assert(dll.last_error==WIN32_DLL_ERROR_INVALID_HANDLE);
+    vm.bytes=BYTES;
+    assert(!win32_dll_load(&dll,BASE+0x2400u));
+    assert(dll.last_error==WIN32_DLL_ERROR_MOD_NOT_FOUND);
     dll.images[0].state=2u;
     dll.images[0].handle=BASE+0x190000u;
     dll.images[0].info.guest_base=dll.images[0].handle;
