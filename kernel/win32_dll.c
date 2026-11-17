@@ -340,6 +340,7 @@ bool win32_dll_bind_exe_imports(win32_dll_t *dll,uint32_t image_size,
                                 uint32_t *bound_count) {
     if(bound_count)*bound_count=0u;
     if(!dll || !dll->vm || !dll->vm->guest || !bound_count ||
+       dll->guest!=dll->vm->guest ||
        dll->base!=dll->vm->base || image_size>WIN32_VM_START ||
        (size_t)image_size>dll->bytes ||
        (size_t)image_size>dll->vm->bytes)return false;
