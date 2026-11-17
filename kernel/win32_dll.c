@@ -491,10 +491,12 @@ uint32_t win32_dll_symbol(win32_dll_t *dll,uint32_t handle,
         /* Never dereference an absent VM or an out-of-bounds module image
          * when resolving an export from a previously loaded DLL. */
         if(!dll->vm || !dll->vm->guest || !m->info.image_size ||
+           dll->vm->guest!=dll->guest || dll->vm->base!=dll->base ||
            m->info.guest_base!=handle ||
            handle<dll->vm->base ||
            (uint64_t)(handle-dll->vm->base)+m->info.image_size>
-               dll->vm->bytes)
+               dll->vm->bytes ||
+           (uint64_t)(handle-dll->base)+m->info.image_size>dll->bytes)
             return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
         /* A mapped DLL with DllMain must finish PROCESS_ATTACH before
          * GetProcAddress exposes a callable guest entrypoint. A failed
