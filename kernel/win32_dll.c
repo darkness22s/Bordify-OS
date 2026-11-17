@@ -366,6 +366,12 @@ bool win32_dll_attach_plan(const win32_dll_t *dll,
                            uint32_t *count) {
     if(!dll || !handles || !entries || !count)return false;
     *count=0u;
+    /* The callback plan is consumed by the ring-3 executor. A DLL
+     * context whose VM has been replaced or shortened must not authorize
+     * execution at addresses backed by unrelated guest memory. */
+    if(dll->vm && (dll->vm->guest!=dll->guest ||
+                   dll->vm->base!=dll->base ||
+                   dll->vm->bytes<dll->bytes))return false;
     /* Plan atomically: a cycle or invalid entry must not expose a
      * partially ordered list to the caller. */
     uint32_t planned_handles[WIN32_DLL_MAX_IMAGES];
