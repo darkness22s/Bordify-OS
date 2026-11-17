@@ -255,6 +255,13 @@ static uint32_t load_name_mode(win32_dll_t *dll,const char *name,bool dependency
     }
     if(!valid_dll_basename(name) || !dll->reader || !dll->vm)
         return fail(dll,WIN32_DLL_ERROR_MOD_NOT_FOUND);
+    /* A stale VM must never be used to stage or resolve a real DLL.
+     * In particular, vm_alloc_module writes into vm->guest while the
+     * caller-visible DLL strings and exports use dll->guest. */
+    if(!dll->guest || !dll->vm->guest ||
+       dll->vm->guest!=dll->guest || dll->vm->base!=dll->base ||
+       dll->vm->bytes<dll->bytes)
+        return fail(dll,WIN32_DLL_ERROR_INVALID_HANDLE);
     int slot=slot_by_name(dll,name);
     if(slot>=0) {
         win32_dll_image_t *m=&dll->images[slot];
