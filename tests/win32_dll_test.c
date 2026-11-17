@@ -164,6 +164,29 @@ int main(void) {
     dll.images[0].info.guest_base=dll.images[0].handle;
     assert(win32_dll_attach_plan(&dll,modules,entries,&number));
     assert(number==2u);
+    /* The attach executor must not trust a plan when the VM and DLL
+     * context disagree about the guest address space or backing store. */
+    win32_vm_t attach_vm;
+    win32_vm_init(&attach_vm,guest,BASE,BYTES);
+    win32_dll_set_reader(&dll,&attach_vm,NULL,NULL);
+    assert(win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==2u);
+    modules[0]=0x12345678u;entries[0]=0x87654321u;
+    attach_vm.base=BASE+0x1000u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u && modules[0]==0x12345678u &&
+           entries[0]==0x87654321u);
+    attach_vm.base=BASE;
+    attach_vm.guest=guest+0x1000u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u);
+    attach_vm.guest=guest;
+    attach_vm.bytes=BYTES-1u;
+    assert(!win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==0u);
+    attach_vm.bytes=BYTES;
+    assert(win32_dll_attach_plan(&dll,modules,entries,&number));
+    assert(number==2u);
     /* GetProcAddress on a synthetic live image with no VM must fail
      * cleanly instead of dereferencing a null VM pointer. */
     win32_dll_init(&dll,guest,BASE,BYTES);
